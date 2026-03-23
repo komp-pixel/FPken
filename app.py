@@ -16,10 +16,13 @@ from supabase import Client
 
 from kf_auth import gate_auth, logout
 from kf_constants import (
+    ACCOUNT_KIND_LABELS,
     CURRENCIES,
     EXPENSE_CATEGORIES,
     INCOME_BUSINESSES,
-    INSTITUTION_PRESETS,
+    INSTITUTION_APPS,
+    INSTITUTION_BANKS,
+    INSTITUTION_WALLET,
     TRANSFER_TAGS,
 )
 from kf_dashboard import render_finance_dashboard
@@ -58,8 +61,9 @@ def kf_account_insert_flexible(sb: Client, row: dict[str, Any]) -> tuple[bool, s
         except Exception as e2:
             return False, f"{first}\n---\n{str(e2)}"
         return True, (
-            "Cuenta creada con datos básicos. Para guardar tipo de institución, nº de cuenta, "
-            "Zelle y wallet, ejecutá en Supabase **`supabase/patch_004_accounts_reports.sql`**."
+            "Creado con datos mínimos. En Supabase ejecutá **`patch_004_accounts_reports.sql`** "
+            "y **`patch_005_account_kind.sql`** para guardar también tipo (banco/wallet/app), "
+            "nº de cuenta, Zelle, wallet y clasificación."
         )
 
 
@@ -77,9 +81,20 @@ def kf_account_update_flexible(sb: Client, acc_id: str, row: dict[str, Any]) -> 
         except Exception as e2:
             return False, f"{first}\n---\n{str(e2)}"
         return True, (
-            "Guardado parcial. Ejecutá **`patch_004_accounts_reports.sql`** en Supabase para los "
-            "campos extendidos (institución, cuenta, Zelle, wallet)."
+            "Guardado parcial. Ejecutá **`patch_004`** y **`patch_005_account_kind.sql`** en Supabase."
         )
+
+
+def _bootstrap_account_result(ok: bool, wmsg: str | None) -> None:
+    if ok:
+        if wmsg:
+            st.warning(wmsg)
+        else:
+            st.success("Registro creado.")
+        st.rerun()
+    else:
+        st.error("No se pudo crear.")
+        st.code(wmsg or "")
 
 
 def _amount_input_format(currency: str) -> tuple[float, str]:
@@ -88,126 +103,305 @@ def _amount_input_format(currency: str) -> tuple[float, str]:
     return 0.01, "%.2f"
 
 
+def _infer_account_kind(acc: dict[str, Any]) -> str:
+    k = acc.get("account_kind")
+    if k in ("banco", "wallet", "app_pagos"):
+        return str(k)
+    ik = str(acc.get("institution_kind") or "").strip().lower()
+    if any(x in ik for x in ("zinly", "zelle")):
+        return "app_pagos"
+    if any(x in ik for x in ("binance", "on-chain", "metamask", "wallet")):
+        return "wallet"
+    if acc.get("wallet_address") and not str(acc.get("account_number") or "").strip():
+        return "wallet"
+    if acc.get("zelle_email_or_phone") and not str(acc.get("account_number") or "").strip():
+        return "app_pagos"
+    return "banco"
+
+
+def _nulls_for_kind(kind: str) -> dict[str, Any]:
+    if kind == "banco":
+        return {"wallet_address": None, "zelle_email_or_phone": None}
+    if kind == "wallet":
+        return {
+            "account_number": None,
+            "routing_or_swift": None,
+            "zelle_email_or_phone": None,
+        }
+    if kind == "app_pagos":
+        return {"wallet_address": None, "account_number": None, "routing_or_swift": None}
+    return {}
+
+
+def _render_account_detail(acc: dict[str, Any], kind: str) -> None:
+    st.caption(f"Clasificación: **{ACCOUNT_KIND_LABELS.get(kind, kind)}**")
+    if kind == "banco":
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"**Banco:** {acc.get('bank_name') or '—'}")
+            st.markdown(f"**Institución:** {acc.get('institution_kind') or '—'}")
+            st.markdown(f"**Nº cuenta / ref:** `{acc.get('account_number') or '—'}`")
+            st.markdown(f"**Routing / Swift:** {acc.get('routing_or_swift') or '—'}")
+        with c2:
+            st.markdown(f"**Titular:** {acc.get('holder_name') or '—'}")
+    elif kind == "wallet":
+        st.markdown(f"**Exchange / red:** {acc.get('bank_name') or acc.get('institution_kind') or '—'}")
+        st.markdown(f"**Dirección o UID:** `{acc.get('wallet_address') or '—'}`")
+        st.markdown(f"**Titular:** {acc.get('holder_name') or '—'}")
+    else:
+        st.markdown(f"**App:** {acc.get('institution_kind') or acc.get('bank_name') or '—'}")
+        st.markdown(f"**Usuario / email / tel.:** `{acc.get('zelle_email_or_phone') or '—'}`")
+        st.markdown(f"**Titular:** {acc.get('holder_name') or '—'}")
+    n = acc.get("notes") or ""
+    if str(n).strip():
+        st.text_area("Notas", value=str(n), height=72, disabled=True)
+
+
 def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
-    st.subheader("Cuentas, bancos y wallets")
+    st.subheader("Registros por tipo (separados)")
     st.caption(
-        "Registrá Banesco, Banca Amiga (VES), Binance (USDT), Zelle, etc. "
-        "Datos sensibles: usá la app en cuenta personal y no subas capturas con claves."
+        "**Banco** = cuenta en Banesco, BofA, Banca Amiga… "
+        "**Wallet** = Binance / USDT / on-chain (sin número de cuenta bancario). "
+        "**App** = Zinly, Zelle (pagos digitales; no es lo mismo que una cuenta corriente)."
     )
     st.info(
-        "Si al crear o editar cuenta falla todo, en Supabase SQL Editor ejecutá "
-        "**`patch_004_accounts_reports.sql`** (columnas extra en `kf_account`)."
+        "SQL en Supabase: **`patch_004_accounts_reports.sql`** y **`patch_005_account_kind.sql`**."
     )
-    for a in sorted(accounts, key=lambda x: str(x.get("label") or "")):
-        cur = a.get("currency", "?")
-        with st.expander(f"{a.get('label')} · {cur}", expanded=False):
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown(f"**Institución (tipo):** {a.get('institution_kind') or '—'}")
-                st.markdown(f"**Banco (nombre):** {a.get('bank_name') or '—'}")
-                st.markdown(f"**Nº cuenta / referencia:** `{a.get('account_number') or '—'}`")
-                st.markdown(f"**Routing / Swift:** {a.get('routing_or_swift') or '—'}")
-            with c2:
-                st.markdown(f"**Titular:** {a.get('holder_name') or '—'}")
-                st.markdown(f"**Zelle (email o tel):** {a.get('zelle_email_or_phone') or '—'}")
-                w = a.get("wallet_address") or "—"
-                st.markdown(f"**Wallet / UID Binance:** `{w}`")
-            n = a.get("notes") or ""
-            if n.strip():
-                st.text_area("Notas (futuros, apalancamiento, recordatorios)", value=n, height=90, disabled=True)
 
-    st.divider()
-    with st.expander("Agregar cuenta nueva (VES, USDT, otra cuenta USD…)", expanded=False):
-        with st.form("add_acc"):
-            alabel = st.text_input("Nombre visible", placeholder="Banesco ahorro / Binance spot")
-            cur = st.selectbox("Moneda de la cuenta", CURRENCIES)
-            bank = st.text_input("Nombre banco o exchange", placeholder="Banesco / Binance")
-            ikind = st.selectbox("Tipo de institución", INSTITUTION_PRESETS)
-            iother = st.text_input("Si tipo = Otro, especificá")
-            holder = st.text_input("Titular")
-            acc_num = st.text_input("Número de cuenta / IBAN / ref (opcional)")
-            rout = st.text_input("Routing, ABA o Swift (opcional)")
-            zelle = st.text_input("Zelle: email o teléfono (opcional)")
-            wallet = st.text_input("Dirección wallet USDT o UID de exchange (opcional)")
-            anotes = st.text_area("Notas (futuros, estrategia, límites…)", height=72)
-            op = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f")
-            od = st.date_input("Fecha de ese saldo", value=date.today())
-            if st.form_submit_button("Crear cuenta"):
-                inst = _pick_list_value(ikind, iother) or ikind
-                ok, wmsg = kf_account_insert_flexible(
-                    sb,
-                    {
-                        "label": alabel.strip() or "Cuenta",
-                        "currency": cur,
-                        "bank_name": bank.strip() or None,
-                        "holder_name": holder.strip() or None,
-                        "institution_kind": inst,
-                        "account_number": acc_num.strip() or None,
-                        "routing_or_swift": rout.strip() or None,
-                        "zelle_email_or_phone": zelle.strip() or None,
-                        "wallet_address": wallet.strip() or None,
-                        "notes": anotes.strip() or None,
-                        "opening_balance": float(op),
-                        "opening_balance_date": od.isoformat(),
-                    },
-                )
-                if ok:
-                    if wmsg:
-                        st.warning(wmsg)
-                    else:
-                        st.success(
-                            "Cuenta creada. Elegila en la barra lateral como **Cuenta activa**."
-                        )
-                    st.rerun()
-                else:
-                    st.error("No se pudo crear la cuenta.")
-                    st.code(wmsg or "")
+    by_k: dict[str, list[dict[str, Any]]] = {"banco": [], "wallet": [], "app_pagos": []}
+    for a in accounts:
+        by_k[_infer_account_kind(a)].append(a)
 
-    st.subheader("Editar cuenta seleccionada")
-    opts = {str(a["id"]): f'{a.get("label")} ({a.get("currency")})' for a in accounts}
-    pick = st.selectbox("Cuenta a editar", options=list(opts.keys()), format_func=lambda i: opts[i])
+    for kind, title in (
+        ("banco", "Cuentas bancarias"),
+        ("wallet", "Wallets y crypto"),
+        ("app_pagos", "Apps de pago (Zinly, Zelle…)"),
+    ):
+        st.markdown(f"### {title}")
+        if not by_k[kind]:
+            st.write("Ningún registro aún.")
+        for a in sorted(by_k[kind], key=lambda x: str(x.get("label") or "")):
+            with st.expander(f"{a.get('label')} · {a.get('currency', '?')}", expanded=False):
+                _render_account_detail(a, kind)
+
+        if kind == "banco":
+            with st.expander("Agregar cuenta **bancaria**", expanded=False):
+                with st.form("add_banco"):
+                    lb = st.text_input("Nombre (ej. Banesco ahorro)", key="ab_lb")
+                    cur = st.selectbox("Moneda", CURRENCIES, index=0, key="ab_cur")
+                    bn = st.text_input("Nombre del banco", key="ab_bn")
+                    ik = st.selectbox("Institución", INSTITUTION_BANKS, key="ab_ik")
+                    io = st.text_input("Si Otro, especificá", key="ab_io")
+                    hol = st.text_input("Titular", key="ab_h")
+                    an = st.text_input("Número de cuenta / IBAN", key="ab_an")
+                    rt = st.text_input("Routing / ABA / Swift", key="ab_rt")
+                    nt = st.text_area("Notas", height=60, key="ab_nt")
+                    op = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f", key="ab_op")
+                    od = st.date_input("Fecha saldo", value=date.today(), key="ab_od")
+                    if st.form_submit_button("Crear banco"):
+                        inst = _pick_list_value(ik, io) or ik
+                        row = {
+                            "account_kind": "banco",
+                            "label": lb.strip() or "Cuenta bancaria",
+                            "currency": cur,
+                            "bank_name": bn.strip() or inst,
+                            "institution_kind": inst,
+                            "holder_name": hol.strip() or None,
+                            "account_number": an.strip() or None,
+                            "routing_or_swift": rt.strip() or None,
+                            "notes": nt.strip() or None,
+                            "opening_balance": float(op),
+                            "opening_balance_date": od.isoformat(),
+                            **_nulls_for_kind("banco"),
+                        }
+                        ok, wmsg = kf_account_insert_flexible(sb, row)
+                        if ok:
+                            if wmsg:
+                                st.warning(wmsg)
+                            else:
+                                st.success("Cuenta bancaria creada.")
+                            st.rerun()
+                        else:
+                            st.error("Error al crear.")
+                            st.code(wmsg or "")
+        elif kind == "wallet":
+            with st.expander("Agregar **wallet / crypto**", expanded=False):
+                with st.form("add_wallet"):
+                    lb = st.text_input("Nombre (ej. Binance spot USDT)", key="aw_lb")
+                    cur = st.selectbox("Moneda", CURRENCIES, index=CURRENCIES.index("USDT"), key="aw_cur")
+                    ik = st.selectbox("Tipo", INSTITUTION_WALLET, key="aw_ik")
+                    io = st.text_input("Si Otro, especificá", key="aw_io")
+                    waddr = st.text_input("Dirección wallet o UID de la cuenta exchange *", key="aw_w")
+                    hol = st.text_input("Titular (opcional)", key="aw_h")
+                    nt = st.text_area("Notas (futuros, redes…)", height=60, key="aw_nt")
+                    op = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f", key="aw_op")
+                    od = st.date_input("Fecha saldo", value=date.today(), key="aw_od")
+                    if st.form_submit_button("Crear wallet"):
+                        inst = _pick_list_value(ik, io) or ik
+                        row = {
+                            "account_kind": "wallet",
+                            "label": lb.strip() or "Wallet",
+                            "currency": cur,
+                            "bank_name": inst,
+                            "institution_kind": inst,
+                            "holder_name": hol.strip() or None,
+                            "wallet_address": waddr.strip() or None,
+                            "notes": nt.strip() or None,
+                            "opening_balance": float(op),
+                            "opening_balance_date": od.isoformat(),
+                            **_nulls_for_kind("wallet"),
+                        }
+                        ok, wmsg = kf_account_insert_flexible(sb, row)
+                        if ok:
+                            if wmsg:
+                                st.warning(wmsg)
+                            else:
+                                st.success("Wallet creada.")
+                            st.rerun()
+                        else:
+                            st.error("Error al crear.")
+                            st.code(wmsg or "")
+        else:
+            with st.expander("Agregar **app de pagos** (Zinly, Zelle…)", expanded=False):
+                with st.form("add_app"):
+                    lb = st.text_input("Nombre (ej. Zinly compras)", key="aa_lb")
+                    cur = st.selectbox("Moneda", CURRENCIES, index=0, key="aa_cur")
+                    ik = st.selectbox("App", INSTITUTION_APPS, key="aa_ik")
+                    io = st.text_input("Si Otro, especificá", key="aa_io")
+                    zid = st.text_input("Email, teléfono o usuario de la app *", key="aa_z")
+                    hol = st.text_input("Titular (opcional)", key="aa_h")
+                    nt = st.text_area("Notas", height=60, key="aa_nt")
+                    op = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f", key="aa_op")
+                    od = st.date_input("Fecha saldo", value=date.today(), key="aa_od")
+                    if st.form_submit_button("Crear app"):
+                        inst = _pick_list_value(ik, io) or ik
+                        row = {
+                            "account_kind": "app_pagos",
+                            "label": lb.strip() or "App",
+                            "currency": cur,
+                            "bank_name": inst,
+                            "institution_kind": inst,
+                            "holder_name": hol.strip() or None,
+                            "zelle_email_or_phone": zid.strip() or None,
+                            "notes": nt.strip() or None,
+                            "opening_balance": float(op),
+                            "opening_balance_date": od.isoformat(),
+                            **_nulls_for_kind("app_pagos"),
+                        }
+                        ok, wmsg = kf_account_insert_flexible(sb, row)
+                        if ok:
+                            if wmsg:
+                                st.warning(wmsg)
+                            else:
+                                st.success("App registrada.")
+                            st.rerun()
+                        else:
+                            st.error("Error al crear.")
+                            st.code(wmsg or "")
+        st.divider()
+
+    st.subheader("Editar registro")
+    opts = {
+        str(a["id"]): f'[{ACCOUNT_KIND_LABELS.get(_infer_account_kind(a), "?")}] {a.get("label")} ({a.get("currency")})'
+        for a in accounts
+    }
+    pick = st.selectbox("Elegir", options=list(opts.keys()), format_func=lambda i: opts[i])
     acc = next(x for x in accounts if str(x["id"]) == pick)
+    kind0 = _infer_account_kind(acc)
+    kind_labels = list(ACCOUNT_KIND_LABELS.keys())
     with st.form("edit_acc"):
+        nk = st.selectbox(
+            "Tipo de registro",
+            kind_labels,
+            index=kind_labels.index(kind0) if kind0 in kind_labels else 0,
+            format_func=lambda k: ACCOUNT_KIND_LABELS[k],
+        )
         elabel = st.text_input("Nombre visible", value=str(acc.get("label") or ""))
-        ecur = st.selectbox("Moneda", CURRENCIES, index=max(0, CURRENCIES.index(acc["currency"])) if acc.get("currency") in CURRENCIES else 0)
-        ebank = st.text_input("Banco o exchange", value=str(acc.get("bank_name") or ""))
-        kinds = INSTITUTION_PRESETS
-        ik0 = acc.get("institution_kind") or "Otro"
-        ei_idx = kinds.index(ik0) if ik0 in kinds else 0
-        ei = st.selectbox("Tipo institución", kinds, index=ei_idx)
-        ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in kinds else str(ik0))
+        ecur = st.selectbox(
+            "Moneda",
+            CURRENCIES,
+            index=CURRENCIES.index(acc["currency"]) if acc.get("currency") in CURRENCIES else 0,
+        )
         eholder = st.text_input("Titular", value=str(acc.get("holder_name") or ""))
-        enum = st.text_input("Nº cuenta / ref", value=str(acc.get("account_number") or ""))
-        erout = st.text_input("Routing / Swift", value=str(acc.get("routing_or_swift") or ""))
-        ezelle = st.text_input("Zelle", value=str(acc.get("zelle_email_or_phone") or ""))
-        ewallet = st.text_input("Wallet / UID", value=str(acc.get("wallet_address") or ""))
-        enotes = st.text_area("Notas", value=str(acc.get("notes") or ""), height=80)
-        if st.form_submit_button("Guardar cambios"):
-            inst_e = _pick_list_value(ei, ei_other) or ei
-            ok, wmsg = kf_account_update_flexible(
-                sb,
-                pick,
-                {
-                    "label": elabel.strip() or "Cuenta",
-                    "currency": ecur,
-                    "bank_name": ebank.strip() or None,
-                    "institution_kind": inst_e,
-                    "holder_name": eholder.strip() or None,
-                    "account_number": enum.strip() or None,
-                    "routing_or_swift": erout.strip() or None,
-                    "zelle_email_or_phone": ezelle.strip() or None,
-                    "wallet_address": ewallet.strip() or None,
-                    "notes": enotes.strip() or None,
-                },
+        enotes = st.text_area("Notas", value=str(acc.get("notes") or ""), height=70)
+
+        if nk == "banco":
+            ebank = st.text_input("Nombre del banco", value=str(acc.get("bank_name") or ""))
+            ik0 = acc.get("institution_kind") or "Otro"
+            ei = st.selectbox(
+                "Institución",
+                INSTITUTION_BANKS,
+                index=INSTITUTION_BANKS.index(ik0) if ik0 in INSTITUTION_BANKS else 0,
             )
+            ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in INSTITUTION_BANKS else ik0)
+            enum = st.text_input("Nº cuenta / ref", value=str(acc.get("account_number") or ""))
+            erout = st.text_input("Routing / Swift", value=str(acc.get("routing_or_swift") or ""))
+        elif nk == "wallet":
+            ebank = st.text_input("Exchange / red", value=str(acc.get("bank_name") or ""))
+            ik0 = acc.get("institution_kind") or "Otro"
+            ei = st.selectbox(
+                "Tipo",
+                INSTITUTION_WALLET,
+                index=INSTITUTION_WALLET.index(ik0) if ik0 in INSTITUTION_WALLET else 0,
+            )
+            ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in INSTITUTION_WALLET else ik0)
+            ewallet = st.text_input("Wallet / UID", value=str(acc.get("wallet_address") or ""))
+        else:
+            ebank = st.text_input("App (nombre)", value=str(acc.get("bank_name") or ""))
+            ik0 = acc.get("institution_kind") or "Otro"
+            ei = st.selectbox(
+                "App",
+                INSTITUTION_APPS,
+                index=INSTITUTION_APPS.index(ik0) if ik0 in INSTITUTION_APPS else 0,
+            )
+            ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in INSTITUTION_APPS else ik0)
+            ezelle = st.text_input(
+                "Usuario / email / tel.",
+                value=str(acc.get("zelle_email_or_phone") or ""),
+            )
+
+        if st.form_submit_button("Guardar"):
+            inst_e = _pick_list_value(ei, ei_other) or ei
+            base: dict[str, Any] = {
+                "account_kind": nk,
+                "label": elabel.strip() or "Cuenta",
+                "currency": ecur,
+                "holder_name": eholder.strip() or None,
+                "notes": enotes.strip() or None,
+                "institution_kind": inst_e,
+                **_nulls_for_kind(nk),
+            }
+            if nk == "banco":
+                base.update(
+                    {
+                        "bank_name": ebank.strip() or inst_e,
+                        "account_number": enum.strip() or None,
+                        "routing_or_swift": erout.strip() or None,
+                    }
+                )
+            elif nk == "wallet":
+                base.update(
+                    {
+                        "bank_name": ebank.strip() or inst_e,
+                        "wallet_address": ewallet.strip() or None,
+                    }
+                )
+            else:
+                base.update(
+                    {
+                        "bank_name": ebank.strip() or inst_e,
+                        "zelle_email_or_phone": ezelle.strip() or None,
+                    }
+                )
+            ok, wmsg = kf_account_update_flexible(sb, pick, base)
             if ok:
                 if wmsg:
                     st.warning(wmsg)
                 else:
-                    st.success("Cuenta actualizada.")
+                    st.success("Actualizado.")
                 st.rerun()
             else:
-                st.error("No se pudo actualizar.")
+                st.error("No se pudo guardar.")
                 st.code(wmsg or "")
 
 
@@ -608,64 +802,115 @@ def main() -> None:
             "Usuario listo. **Ahora creá la cuenta del banco** (BofA) con el formulario de abajo; "
             "sin eso no hay Dashboard ni movimientos."
         )
-        st.subheader("Primera cuenta (obligatorio para continuar)")
-        with st.form("new_account"):
-            label = st.text_input("Nombre de la cuenta", value="BofA — Orlando Linares")
-            cur0 = st.selectbox("Moneda", CURRENCIES, index=0)
-            bank = st.text_input("Banco / exchange", value="Bank of America")
-            ikind = st.selectbox("Tipo", INSTITUTION_PRESETS, index=0)
-            iother = st.text_input("Si tipo = Otro, especificá")
-            holder = st.text_input("Titular", value="Orlando Linares")
-            acc_num = st.text_input("Nº cuenta / ref (opcional)")
-            rout = st.text_input("Routing / Swift (opcional)")
-            zelle = st.text_input("Zelle email/tel (opcional)")
-            wallet = st.text_input("Wallet USDT / UID (opcional)")
-            opening = st.number_input(
-                "Saldo inicial",
-                min_value=-1e15,
-                value=0.0,
-                step=0.01,
-                format="%.8f",
-            )
-            ob_date = st.date_input("Fecha de ese saldo", value=date.today())
-            notes = st.text_area("Notas (opcional)", height=68)
-            if st.form_submit_button("Crear cuenta"):
-                inst = _pick_list_value(ikind, iother) or ikind
-                ok, wmsg = kf_account_insert_flexible(
-                    sb,
-                    {
-                        "label": label.strip() or "Cuenta",
-                        "bank_name": bank.strip() or None,
-                        "holder_name": holder.strip() or None,
-                        "currency": cur0,
-                        "institution_kind": inst,
-                        "account_number": acc_num.strip() or None,
-                        "routing_or_swift": rout.strip() or None,
-                        "zelle_email_or_phone": zelle.strip() or None,
-                        "wallet_address": wallet.strip() or None,
-                        "opening_balance": float(opening),
-                        "opening_balance_date": ob_date.isoformat(),
-                        "notes": notes.strip() or None,
-                    },
-                )
-                if ok:
-                    if wmsg:
-                        st.warning(wmsg)
-                    else:
-                        st.success("Cuenta creada.")
-                    st.rerun()
-                else:
-                    st.error("No se pudo crear la cuenta.")
-                    st.code(wmsg or "")
+        st.subheader("Primer registro (elegí una pestaña)")
+        st.caption("Banco, wallet y app son formularios distintos — no mezcles datos.")
+        tb, tw, ta = st.tabs(["Cuenta bancaria", "Wallet crypto", "App Zinly / Zelle"])
+        with tb:
+            with st.form("new_banco"):
+                label = st.text_input("Nombre", value="BofA — Orlando Linares")
+                cur0 = st.selectbox("Moneda", CURRENCIES, index=0)
+                bank = st.text_input("Nombre del banco", value="Bank of America")
+                ikind = st.selectbox("Institución", INSTITUTION_BANKS, index=0)
+                iother = st.text_input("Si Otro, especificá")
+                holder = st.text_input("Titular", value="Orlando Linares")
+                acc_num = st.text_input("Nº cuenta / ref")
+                rout = st.text_input("Routing / Swift (opcional)")
+                opening = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f")
+                ob_date = st.date_input("Fecha de ese saldo", value=date.today())
+                notes = st.text_area("Notas", height=50)
+                if st.form_submit_button("Crear banco"):
+                    inst = _pick_list_value(ikind, iother) or ikind
+                    ok, wmsg = kf_account_insert_flexible(
+                        sb,
+                        {
+                            "account_kind": "banco",
+                            "label": label.strip() or "Cuenta",
+                            "currency": cur0,
+                            "bank_name": bank.strip() or inst,
+                            "institution_kind": inst,
+                            "holder_name": holder.strip() or None,
+                            "account_number": acc_num.strip() or None,
+                            "routing_or_swift": rout.strip() or None,
+                            "notes": notes.strip() or None,
+                            "opening_balance": float(opening),
+                            "opening_balance_date": ob_date.isoformat(),
+                            **_nulls_for_kind("banco"),
+                        },
+                    )
+                    _bootstrap_account_result(ok, wmsg)
+        with tw:
+            with st.form("new_wallet"):
+                label = st.text_input("Nombre", value="Binance USDT")
+                cur0 = st.selectbox("Moneda", CURRENCIES, index=CURRENCIES.index("USDT"))
+                ikind = st.selectbox("Tipo", INSTITUTION_WALLET, index=0)
+                iother = st.text_input("Si Otro, especificá")
+                waddr = st.text_input("Wallet / UID *")
+                holder = st.text_input("Titular (opcional)")
+                opening = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f", key="nw_op")
+                ob_date = st.date_input("Fecha saldo", value=date.today(), key="nw_od")
+                notes = st.text_area("Notas", height=50, key="nw_nt")
+                if st.form_submit_button("Crear wallet"):
+                    inst = _pick_list_value(ikind, iother) or ikind
+                    ok, wmsg = kf_account_insert_flexible(
+                        sb,
+                        {
+                            "account_kind": "wallet",
+                            "label": label.strip() or "Wallet",
+                            "currency": cur0,
+                            "bank_name": inst,
+                            "institution_kind": inst,
+                            "holder_name": holder.strip() or None,
+                            "wallet_address": waddr.strip() or None,
+                            "notes": notes.strip() or None,
+                            "opening_balance": float(opening),
+                            "opening_balance_date": ob_date.isoformat(),
+                            **_nulls_for_kind("wallet"),
+                        },
+                    )
+                    _bootstrap_account_result(ok, wmsg)
+        with ta:
+            with st.form("new_app"):
+                label = st.text_input("Nombre", value="Zinly")
+                cur0 = st.selectbox("Moneda", CURRENCIES, index=0, key="na_cur")
+                ikind = st.selectbox("App", INSTITUTION_APPS, index=0)
+                iother = st.text_input("Si Otro, especificá", key="na_io")
+                zid = st.text_input("Email / tel / usuario *")
+                holder = st.text_input("Titular (opcional)", key="na_h")
+                opening = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f", key="na_op")
+                ob_date = st.date_input("Fecha saldo", value=date.today(), key="na_od")
+                notes = st.text_area("Notas", height=50, key="na_nt")
+                if st.form_submit_button("Crear app"):
+                    inst = _pick_list_value(ikind, iother) or ikind
+                    ok, wmsg = kf_account_insert_flexible(
+                        sb,
+                        {
+                            "account_kind": "app_pagos",
+                            "label": label.strip() or "App",
+                            "currency": cur0,
+                            "bank_name": inst,
+                            "institution_kind": inst,
+                            "holder_name": holder.strip() or None,
+                            "zelle_email_or_phone": zid.strip() or None,
+                            "notes": notes.strip() or None,
+                            "opening_balance": float(opening),
+                            "opening_balance_date": ob_date.isoformat(),
+                            **_nulls_for_kind("app_pagos"),
+                        },
+                    )
+                    _bootstrap_account_result(ok, wmsg)
         return
 
-    opts = {a["id"]: f'{a.get("label")} ({a.get("currency", "USD")})' for a in accounts}
+    opts = {
+        str(a["id"]): f'{a.get("label")} ({a.get("currency", "USD")}) · '
+        f'{ACCOUNT_KIND_LABELS.get(_infer_account_kind(a), "?")}'
+        for a in accounts
+    }
     account_id = (
         list(opts.keys())[0]
         if len(accounts) == 1
         else st.sidebar.selectbox("Cuenta activa", options=list(opts.keys()), format_func=lambda i: opts[i])
     )
-    acc = next(a for a in accounts if a["id"] == account_id)
+    acc = next(a for a in accounts if str(a["id"]) == str(account_id))
     txs = load_transactions(sb, account_id)
     umap = load_user_map(sb)
     balance = compute_balance(acc, txs)

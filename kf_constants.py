@@ -1,4 +1,4 @@
-"""Origen de ingresos (negocios) y categorías de egresos (hogar)."""
+"""Origen de ingresos (negocios), cuentas por tipo (banco / wallet / app) y categorías."""
 
 INCOME_BUSINESSES: list[str] = [
     "Movi Motors",
@@ -9,15 +9,32 @@ INCOME_BUSINESSES: list[str] = [
 
 CURRENCIES: list[str] = ["USD", "VES", "USDT"]
 
-INSTITUTION_PRESETS: list[str] = [
+# Cuentas bancarias tradicionales (Banesco, BofA, Banca Amiga) — sin wallet ni apps.
+INSTITUTION_BANKS: list[str] = [
     "Bank of America",
     "Banesco",
     "Banca Amiga",
-    "Binance",
-    "Zelle",
-    "Zinly",
     "Otro",
 ]
+
+# Solo crypto / exchange (Binance, on-chain, etc.)
+INSTITUTION_WALLET: list[str] = [
+    "Binance",
+    "On-chain / otra wallet",
+    "Otro",
+]
+
+# Zinly, Zelle y similares (pagos digitales; no es cuenta corriente ni wallet on-chain)
+INSTITUTION_APPS: list[str] = [
+    "Zinly",
+    "Zelle",
+    "Otro",
+]
+
+# Compatibilidad con datos viejos o edición genérica
+INSTITUTION_PRESETS: list[str] = (
+    INSTITUTION_BANKS[:-1] + INSTITUTION_WALLET[:-1] + INSTITUTION_APPS
+)
 
 TRANSFER_TAGS: list[str] = [
     "Zelle → Binance / comisión",
@@ -41,3 +58,9 @@ EXPENSE_CATEGORIES: list[str] = [
     "Ocio / viajes",
     "Otro",
 ]
+
+ACCOUNT_KIND_LABELS: dict[str, str] = {
+    "banco": "Cuenta bancaria",
+    "wallet": "Wallet / crypto",
+    "app_pagos": "App de pagos",
+}

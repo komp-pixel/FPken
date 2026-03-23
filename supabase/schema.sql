@@ -19,6 +19,7 @@ create table if not exists public.kf_account (
   opening_balance numeric(20, 8) not null default 0,
   opening_balance_date date not null default (current_date),
   notes text,
+  account_kind text check (account_kind is null or account_kind in ('banco', 'wallet', 'app_pagos')),
   institution_kind text,
   account_number text,
   routing_or_swift text,
