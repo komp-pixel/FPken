@@ -944,11 +944,15 @@ def main() -> None:
     )
 
     with tab_dash:
-        render_payment_method_cards(
-            accounts,
-            heading="Mis cuentas y métodos de pago",
-            caption="Misma vista que en la pestaña **Cuentas**; orden estilo métodos de pago P2P.",
-        )
+        try:
+            render_finance_dashboard(
+                txs,
+                _dec(acc.get("opening_balance")),
+                str(acc.get("currency", "USD")),
+            )
+        except Exception as e:
+            st.error("El tablero falló al cargar. Probá recargar la página o revisá los datos.")
+            st.code(str(e))
         st.divider()
         st.markdown("### Cotizaciones (referencia)")
         _bcv_col, _p2p_intro = st.columns([1, 2])
@@ -984,16 +988,6 @@ def main() -> None:
             )
         elif _ves_u is not None and _ves_t is not None:
             st.info("Activá el desglose arriba para ver total y tabla por cuenta.")
-        st.divider()
-        try:
-            render_finance_dashboard(
-                txs,
-                _dec(acc.get("opening_balance")),
-                str(acc.get("currency", "USD")),
-            )
-        except Exception as e:
-            st.error("El tablero falló al cargar. Probá recargar la página o revisá los datos.")
-            st.code(str(e))
 
     with tab_mov:
         c1, c2, c3, c4 = st.columns(4)
