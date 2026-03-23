@@ -32,6 +32,56 @@ def _pick_list_value(selected: str, other_text: str) -> str | None:
     return selected
 
 
+_KF_ACCOUNT_CORE_FIELDS = frozenset(
+    {
+        "label",
+        "currency",
+        "bank_name",
+        "holder_name",
+        "opening_balance",
+        "opening_balance_date",
+        "notes",
+    }
+)
+
+
+def kf_account_insert_flexible(sb: Client, row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Insert completo; si la BD no tiene patch_004, reintenta solo columnas base."""
+    try:
+        sb.table("kf_account").insert(row).execute()
+        return True, None
+    except Exception as e:
+        first = str(e)
+        core = {k: v for k, v in row.items() if k in _KF_ACCOUNT_CORE_FIELDS}
+        try:
+            sb.table("kf_account").insert(core).execute()
+        except Exception as e2:
+            return False, f"{first}\n---\n{str(e2)}"
+        return True, (
+            "Cuenta creada con datos básicos. Para guardar tipo de institución, nº de cuenta, "
+            "Zelle y wallet, ejecutá en Supabase **`supabase/patch_004_accounts_reports.sql`**."
+        )
+
+
+def kf_account_update_flexible(sb: Client, acc_id: str, row: dict[str, Any]) -> tuple[bool, str | None]:
+    try:
+        sb.table("kf_account").update(row).eq("id", acc_id).execute()
+        return True, None
+    except Exception as e:
+        first = str(e)
+        core = {k: v for k, v in row.items() if k in _KF_ACCOUNT_CORE_FIELDS}
+        if not core:
+            return False, first
+        try:
+            sb.table("kf_account").update(core).eq("id", acc_id).execute()
+        except Exception as e2:
+            return False, f"{first}\n---\n{str(e2)}"
+        return True, (
+            "Guardado parcial. Ejecutá **`patch_004_accounts_reports.sql`** en Supabase para los "
+            "campos extendidos (institución, cuenta, Zelle, wallet)."
+        )
+
+
 def _amount_input_format(currency: str) -> tuple[float, str]:
     if currency == "USDT":
         return 0.000001, "%.6f"
@@ -43,6 +93,10 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
     st.caption(
         "Registrá Banesco, Banca Amiga (VES), Binance (USDT), Zelle, etc. "
         "Datos sensibles: usá la app en cuenta personal y no subas capturas con claves."
+    )
+    st.info(
+        "Si al crear o editar cuenta falla todo, en Supabase SQL Editor ejecutá "
+        "**`patch_004_accounts_reports.sql`** (columnas extra en `kf_account`)."
     )
     for a in sorted(accounts, key=lambda x: str(x.get("label") or "")):
         cur = a.get("currency", "?")
@@ -80,7 +134,8 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
             od = st.date_input("Fecha de ese saldo", value=date.today())
             if st.form_submit_button("Crear cuenta"):
                 inst = _pick_list_value(ikind, iother) or ikind
-                sb.table("kf_account").insert(
+                ok, wmsg = kf_account_insert_flexible(
+                    sb,
                     {
                         "label": alabel.strip() or "Cuenta",
                         "currency": cur,
@@ -94,10 +149,19 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
                         "notes": anotes.strip() or None,
                         "opening_balance": float(op),
                         "opening_balance_date": od.isoformat(),
-                    }
-                ).execute()
-                st.success("Cuenta creada. Elegila en la barra lateral como **Cuenta activa**.")
-                st.rerun()
+                    },
+                )
+                if ok:
+                    if wmsg:
+                        st.warning(wmsg)
+                    else:
+                        st.success(
+                            "Cuenta creada. Elegila en la barra lateral como **Cuenta activa**."
+                        )
+                    st.rerun()
+                else:
+                    st.error("No se pudo crear la cuenta.")
+                    st.code(wmsg or "")
 
     st.subheader("Editar cuenta seleccionada")
     opts = {str(a["id"]): f'{a.get("label")} ({a.get("currency")})' for a in accounts}
@@ -120,7 +184,9 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
         enotes = st.text_area("Notas", value=str(acc.get("notes") or ""), height=80)
         if st.form_submit_button("Guardar cambios"):
             inst_e = _pick_list_value(ei, ei_other) or ei
-            sb.table("kf_account").update(
+            ok, wmsg = kf_account_update_flexible(
+                sb,
+                pick,
                 {
                     "label": elabel.strip() or "Cuenta",
                     "currency": ecur,
@@ -132,10 +198,17 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
                     "zelle_email_or_phone": ezelle.strip() or None,
                     "wallet_address": ewallet.strip() or None,
                     "notes": enotes.strip() or None,
-                }
-            ).eq("id", pick).execute()
-            st.success("Cuenta actualizada.")
-            st.rerun()
+                },
+            )
+            if ok:
+                if wmsg:
+                    st.warning(wmsg)
+                else:
+                    st.success("Cuenta actualizada.")
+                st.rerun()
+            else:
+                st.error("No se pudo actualizar.")
+                st.code(wmsg or "")
 
 
 def get_supabase() -> Client:
@@ -558,7 +631,8 @@ def main() -> None:
             notes = st.text_area("Notas (opcional)", height=68)
             if st.form_submit_button("Crear cuenta"):
                 inst = _pick_list_value(ikind, iother) or ikind
-                sb.table("kf_account").insert(
+                ok, wmsg = kf_account_insert_flexible(
+                    sb,
                     {
                         "label": label.strip() or "Cuenta",
                         "bank_name": bank.strip() or None,
@@ -572,10 +646,17 @@ def main() -> None:
                         "opening_balance": float(opening),
                         "opening_balance_date": ob_date.isoformat(),
                         "notes": notes.strip() or None,
-                    }
-                ).execute()
-                st.success("Cuenta creada.")
-                st.rerun()
+                    },
+                )
+                if ok:
+                    if wmsg:
+                        st.warning(wmsg)
+                    else:
+                        st.success("Cuenta creada.")
+                    st.rerun()
+                else:
+                    st.error("No se pudo crear la cuenta.")
+                    st.code(wmsg or "")
         return
 
     opts = {a["id"]: f'{a.get("label")} ({a.get("currency", "USD")})' for a in accounts}
