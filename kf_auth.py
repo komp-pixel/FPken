@@ -65,6 +65,13 @@ def _cookie_manager():
     return CookieManager(key="kf_fin_cookie_mgr")
 
 
+def safe_cookie_manager():
+    try:
+        return _cookie_manager() if cookie_support() else None
+    except Exception:
+        return None
+
+
 def cookie_support() -> bool:
     try:
         import extra_streamlit_components  # noqa: F401
@@ -134,8 +141,9 @@ def logout() -> None:
     for k in ("kf_uid", "kf_username", "kf_display_name", "kf_is_admin"):
         st.session_state.pop(k, None)
     try:
-        cm = _cookie_manager()
-        cm.delete(KF_SESSION_COOKIE, key="kf_cookie_logout")
+        cm = safe_cookie_manager()
+        if cm is not None:
+            cm.delete(KF_SESSION_COOKIE, key="kf_cookie_logout")
     except Exception:
         pass
 
@@ -194,7 +202,7 @@ def count_users(sb: Client) -> int:
 
 def gate_auth(sb: Client) -> dict[str, Any] | None:
     """Devuelve el usuario logueado o detiene la app con login / bootstrap."""
-    cm = _cookie_manager() if cookie_support() else None
+    cm = safe_cookie_manager()
     try:
         _restore_session_from_cookie(sb, cm)
     except Exception:

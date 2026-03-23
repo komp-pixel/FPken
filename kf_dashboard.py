@@ -35,22 +35,26 @@ def render_finance_dashboard(
 ) -> None:
     df = txs_to_dataframe(txs)
     today = date.today()
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        range_key = st.selectbox(
-            "Vista rápida",
-            ["Últimos 30 días", "Este mes", "Este año", "Últimos 12 meses", "Todo"],
-            index=0,
-            key="dash_range",
-        )
-    with col_f2:
-        custom = st.date_input(
-            "O filtrá fechas (opcional)",
-            value=(today - timedelta(days=89), today),
-            key="dash_custom_range",
-        )
-
-    if range_key == "Últimos 30 días":
+    range_key = st.selectbox(
+        "Vista rápida",
+        [
+            "Últimos 30 días",
+            "Este mes",
+            "Este año",
+            "Últimos 12 meses",
+            "Todo",
+            "Personalizado (elegir fechas abajo)",
+        ],
+        index=0,
+        key="dash_range",
+    )
+    if range_key == "Personalizado (elegir fechas abajo)":
+        c0, c1 = st.columns(2)
+        with c0:
+            d0 = st.date_input("Desde", value=today - timedelta(days=89), key="dash_d0")
+        with c1:
+            d1 = st.date_input("Hasta", value=today, key="dash_d1")
+    elif range_key == "Últimos 30 días":
         d0, d1 = today - timedelta(days=29), today
     elif range_key == "Este mes":
         d0, d1 = date(today.year, today.month, 1), today
@@ -60,11 +64,6 @@ def render_finance_dashboard(
         d0, d1 = today - timedelta(days=364), today
     else:
         d0, d1 = None, None
-
-    if isinstance(custom, tuple) and len(custom) == 2:
-        c0, c1 = custom[0], custom[1]
-        if c0 and c1:
-            d0, d1 = c0, c1
 
     mask = pd.Series(True, index=df.index) if len(df) else None
     if len(df) and mask is not None and d0 is not None and d1 is not None:

@@ -349,6 +349,7 @@ def main() -> None:
             logout()
             st.rerun()
         st.divider()
+        st.caption("Usá las pestañas **Dashboard · Movimientos · Usuarios** en la página principal.")
 
     try:
         accounts = load_accounts(sb)
@@ -360,7 +361,11 @@ def main() -> None:
 
     if not accounts:
         st.title("Kenny Finanzas")
-        st.subheader("Primera vez: crear la cuenta bancaria (BofA)")
+        st.success(
+            "Usuario listo. **Ahora creá la cuenta del banco** (BofA) con el formulario de abajo; "
+            "sin eso no hay Dashboard ni movimientos."
+        )
+        st.subheader("Cuenta bancaria (obligatorio)")
         with st.form("new_account"):
             label = st.text_input("Nombre de la cuenta", value="BofA — Orlando Linares")
             bank = st.text_input("Banco", value="Bank of America")
@@ -388,7 +393,7 @@ def main() -> None:
                 ).execute()
                 st.success("Cuenta creada.")
                 st.rerun()
-        st.stop()
+        return
 
     opts = {a["id"]: f'{a.get("label")} ({a.get("currency", "USD")})' for a in accounts}
     account_id = (
@@ -401,26 +406,23 @@ def main() -> None:
     umap = load_user_map(sb)
     balance = compute_balance(acc, txs)
 
-    nav = st.sidebar.radio(
-        "Sección",
-        ["Dashboard", "Movimientos", "Usuarios"],
-        index=0,
-    )
-    if nav == "Usuarios" and not user.get("is_admin"):
-        st.warning("No tenés permiso para administrar usuarios.")
-        nav = "Dashboard"
-
     st.title("Kenny Finanzas")
     st.caption("Cuenta compartida · cada movimiento queda registrado con tu usuario")
 
-    if nav == "Dashboard":
-        render_finance_dashboard(
-            txs,
-            _dec(acc.get("opening_balance")),
-            str(acc.get("currency", "USD")),
-        )
+    tab_dash, tab_mov, tab_usr = st.tabs(["Dashboard", "Movimientos", "Usuarios"])
 
-    elif nav == "Movimientos":
+    with tab_dash:
+        try:
+            render_finance_dashboard(
+                txs,
+                _dec(acc.get("opening_balance")),
+                str(acc.get("currency", "USD")),
+            )
+        except Exception as e:
+            st.error("El tablero falló al cargar. Probá recargar la página o revisá los datos.")
+            st.code(str(e))
+
+    with tab_mov:
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo calculado", f"{balance:,.2f} {acc.get('currency', 'USD')}")
         c2.metric("Saldo inicial", f'{_dec(acc.get("opening_balance")):,.2f}')
@@ -501,8 +503,11 @@ def main() -> None:
                 st.success("Eliminado.")
                 st.rerun()
 
-    else:
-        page_users_admin(sb)
+    with tab_usr:
+        if user.get("is_admin"):
+            page_users_admin(sb)
+        else:
+            st.info("Solo un administrador puede crear usuarios. Pedile acceso a quien creó el primer usuario.")
 
 
 if __name__ == "__main__":
