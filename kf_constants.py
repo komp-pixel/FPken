@@ -15,11 +15,13 @@ INSTITUTION_PRESETS: list[str] = [
     "Banca Amiga",
     "Binance",
     "Zelle",
+    "Zinly",
     "Otro",
 ]
 
 TRANSFER_TAGS: list[str] = [
     "Zelle → Binance / comisión",
+    "Zinly / compras electrónicas",
     "P2P bolívares",
     "Futuros / inversión",
     "Entre mis cuentas",
@@ -34,6 +36,7 @@ EXPENSE_CATEGORIES: list[str] = [
     "Educación",
     "Comida",
     "Servicios",
+    "Compras electrónicas / online",
     "Impuestos / banco",
     "Ocio / viajes",
     "Otro",
