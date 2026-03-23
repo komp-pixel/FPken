@@ -915,7 +915,7 @@ def main() -> None:
     )
 
     st.sidebar.divider()
-    st.sidebar.subheader("Saldos en bolívares")
+    st.sidebar.subheader("Tasa (bolívares)")
     _fx_choices: list[tuple[str, str]] = [
         ("BCV oficial (promedio)", "bcv"),
         ("P2P — comprar USDT (mediana)", "p2p_buy"),
@@ -924,10 +924,11 @@ def main() -> None:
     ]
     _fx_labels = [t[0] for t in _fx_choices]
     _fx_pick = st.sidebar.selectbox(
-        "Tasa para convertir saldos",
+        "Convertir USD / USDT a VES con",
         _fx_labels,
         key="kf_fx_mode_label",
-        help="Una misma tasa aplica a USD y USDT como referencia; VES queda en Bs.",
+        help="Una misma tasa aplica a USD y USDT como referencia; VES queda en Bs. "
+        "El desglose por cuenta está en Dashboard.",
     )
     _fx_mode = dict(_fx_choices)[_fx_pick]
     _manual_bs: float | None = None
@@ -943,30 +944,10 @@ def main() -> None:
         )
     _ves_u, _ves_t, _fx_caption = resolve_ves_rates(_fx_mode, _manual_bs)
     st.sidebar.caption(_fx_caption)
-    _fx_detail = st.sidebar.checkbox(
-        "Desglose por cuenta (lee movimientos de todas)",
-        value=False,
-        key="kf_fx_detail_all",
-        help="Si tenés muchas cuentas o muchos movimientos, dejalo apagado y solo verás el equivalente VES de la cuenta activa en Movimientos.",
-    )
-    if _ves_u is not None and _ves_t is not None:
-        if _fx_detail:
-            _rows, _tot = all_balances_with_ves(
-                sb, accounts, load_transactions, compute_balance, _ves_u, _ves_t
-            )
-            st.sidebar.metric("Total patrimonio ≈ VES", f"{float(_tot):,.2f}")
-            st.sidebar.dataframe(
-                pd.DataFrame(_rows),
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.sidebar.caption(
-                "Activá «Desglose por cuenta» para total y tabla. "
-                "La cuenta activa igual muestra ≈ VES en la pestaña Movimientos."
-            )
+    if _ves_u is None or _ves_t is None:
+        st.sidebar.warning("No hay tasa válida; revisá la opción o la red.")
     else:
-        st.sidebar.warning("No hay tasa válida para convertir.")
+        st.sidebar.caption("Tabla de saldos en VES: **Dashboard**.")
 
     acc = next(a for a in accounts if str(a["id"]) == str(account_id))
     txs = load_transactions(sb, account_id)
@@ -991,6 +972,30 @@ def main() -> None:
                 "No son cotizaciones de contrato."
             )
         render_usdt_ves_p2p_reference()
+        st.divider()
+        st.markdown("### Patrimonio en bolívares (todas las cuentas)")
+        st.caption(
+            "Usa la tasa de la barra lateral. Activá el desglose solo si querés total y tabla "
+            "(consulta movimientos de cada cuenta)."
+        )
+        _fx_detail = st.checkbox(
+            "Mostrar desglose por cuenta y total ≈ VES",
+            value=False,
+            key="kf_fx_detail_all",
+            help="Apagado por defecto: evita leer todas las cuentas en cada recarga.",
+        )
+        if _ves_u is not None and _ves_t is not None and _fx_detail:
+            _rows, _tot = all_balances_with_ves(
+                sb, accounts, load_transactions, compute_balance, _ves_u, _ves_t
+            )
+            st.metric("Total patrimonio ≈ VES", f"{float(_tot):,.2f}")
+            st.dataframe(
+                pd.DataFrame(_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+        elif _ves_u is not None and _ves_t is not None:
+            st.info("Activá el desglose arriba para ver total y tabla por cuenta.")
         st.divider()
         try:
             render_finance_dashboard(
