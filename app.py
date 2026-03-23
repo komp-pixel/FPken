@@ -14,8 +14,15 @@ import pandas as pd
 import streamlit as st
 from supabase import Client
 
-from kf_auth import current_user, gate_auth, logout
+from kf_auth import gate_auth, logout
+from kf_constants import EXPENSE_CATEGORIES, INCOME_BUSINESSES
 from kf_dashboard import render_finance_dashboard
+
+
+def _pick_list_value(selected: str, other_text: str) -> str | None:
+    if selected == "Otro":
+        return other_text.strip() or None
+    return selected
 
 
 def get_supabase() -> Client:
@@ -191,7 +198,12 @@ def import_excel_section(
     if mode.startswith("Dos columnas"):
         col_in = st.selectbox("Columna INGRESO", ["—"] + cols, key="im_in")
         col_eg = st.selectbox("Columna EGRESO", ["—"] + cols, key="im_eg")
-        col_cat = st.selectbox("Columna categoría (opcional)", ["—"] + cols, key="im_c2")
+        col_cat = st.selectbox(
+            "Columna rubro de gasto (opcional, egresos)", ["—"] + cols, key="im_c2"
+        )
+        col_biz = st.selectbox(
+            "Columna negocio / fuente (opcional, ingresos)", ["—"] + cols, key="im_biz"
+        )
 
         if col_fecha == "—" or col_desc == "—" or col_in == "—" or col_eg == "—":
             st.info("Elegí fecha, descripción, ingreso y egreso.")
@@ -210,11 +222,16 @@ def import_excel_section(
             txd = td.date()
             ing = _parse_money_cell(raw.iloc[i][col_in])
             egr = _parse_money_cell(raw.iloc[i][col_eg])
-            cat = None
+            cat_eg = None
             if col_cat != "—":
                 c = raw.iloc[i][col_cat]
                 if c is not None and str(c).strip():
-                    cat = str(c).strip()
+                    cat_eg = str(c).strip()
+            biz_in = None
+            if col_biz != "—":
+                b = raw.iloc[i][col_biz]
+                if b is not None and str(b).strip():
+                    biz_in = str(b).strip()
             if ing is not None and ing > 0:
                 out_rows.append(
                     {
@@ -222,7 +239,8 @@ def import_excel_section(
                         "tx_type": "ingreso",
                         "amount": ing,
                         "description": desc,
-                        "category": cat,
+                        "category": None,
+                        "business": biz_in,
                     }
                 )
             if egr is not None and egr > 0:
@@ -232,7 +250,8 @@ def import_excel_section(
                         "tx_type": "egreso",
                         "amount": egr,
                         "description": desc,
-                        "category": cat,
+                        "category": cat_eg,
+                        "business": None,
                     }
                 )
         work = pd.DataFrame(out_rows) if out_rows else pd.DataFrame()
@@ -242,7 +261,12 @@ def import_excel_section(
         col_tipo = st.selectbox(
             "Columna tipo (opcional)", ["—"] + cols, key="im_t"
         )
-        col_cat = st.selectbox("Columna categoría (opcional)", ["—"] + cols, key="im_c")
+        col_cat = st.selectbox(
+            "Columna rubro de gasto (opcional, egresos)", ["—"] + cols, key="im_c"
+        )
+        col_biz = st.selectbox(
+            "Columna negocio / fuente (opcional, ingresos)", ["—"] + cols, key="im_biz1"
+        )
 
         if col_fecha == "—" or col_monto == "—" or col_desc == "—":
             st.info("Elegí fecha, monto y descripción.")
@@ -276,10 +300,15 @@ def import_excel_section(
             else:
                 tx_type = "egreso" if amt < 0 else "ingreso"
             cat = None
-            if col_cat != "—":
+            if col_cat != "—" and tx_type == "egreso":
                 c = raw.iloc[i][col_cat]
                 if c is not None and str(c).strip():
                     cat = str(c).strip()
+            biz = None
+            if col_biz != "—" and tx_type == "ingreso":
+                b = raw.iloc[i][col_biz]
+                if b is not None and str(b).strip():
+                    biz = str(b).strip()
             tmp.append(
                 {
                     "tx_date": td.date(),
@@ -287,6 +316,7 @@ def import_excel_section(
                     "amount": abs(float(amt)),
                     "description": desc,
                     "category": cat,
+                    "business": biz,
                 }
             )
         work = pd.DataFrame(tmp)
@@ -295,6 +325,9 @@ def import_excel_section(
         st.warning("No quedaron filas para importar (revisá fechas, montos y filtros).")
         st.dataframe(raw.head(20), use_container_width=True)
         return
+
+    if "business" not in work.columns:
+        work["business"] = None
 
     st.write(f"Vista previa: **{len(work)}** movimientos listos.")
     st.dataframe(work.head(25), use_container_width=True)
@@ -308,26 +341,48 @@ def import_excel_section(
     if st.button("Confirmar importación a la cuenta actual", type="primary"):
         rows = []
         for _, row in work.iterrows():
+            tx_t = str(row["tx_type"])
+            cat = (
+                str(row["category"]).strip()
+                if row.get("category") is not None
+                and pd.notna(row.get("category"))
+                and str(row.get("category")).strip()
+                else None
+            )
+            bus = (
+                str(row["business"]).strip()
+                if row.get("business") is not None
+                and pd.notna(row.get("business"))
+                and str(row.get("business")).strip()
+                else None
+            )
             rows.append(
                 {
                     "account_id": account_id,
                     "user_id": user_id,
-                    "tx_type": row["tx_type"],
+                    "tx_type": tx_t,
                     "amount": float(row["amount"]),
                     "tx_date": row["tx_date"].isoformat(),
                     "description": (row["description"] or "")[:500] or "(importado)",
-                    "category": (str(row["category"]).strip() or None)
-                    if row.get("category") is not None
-                    and pd.notna(row.get("category"))
-                    and str(row.get("category")).strip()
-                    else None,
+                    "category": cat if tx_t == "egreso" else None,
+                    "business": bus if tx_t == "ingreso" else None,
                 }
             )
         batch = 200
-        for i in range(0, len(rows), batch):
-            sb.table("kf_transaction").insert(rows[i : i + batch]).execute()
-        st.success(f"Importados {len(rows)} movimientos (registrado por {display_name}).")
-        st.rerun()
+        try:
+            for i in range(0, len(rows), batch):
+                sb.table("kf_transaction").insert(rows[i : i + batch]).execute()
+        except Exception as e:
+            st.error(
+                "Falló la importación. Si falta la columna `business` en Supabase, "
+                "ejecutá `supabase/patch_003_business.sql`."
+            )
+            st.code(str(e))
+        else:
+            st.success(
+                f"Importados {len(rows)} movimientos (registrado por {display_name})."
+            )
+            st.rerun()
 
 
 def main() -> None:
@@ -440,22 +495,55 @@ def main() -> None:
                 amount = st.number_input(
                     "Monto", min_value=0.01, value=10.0, step=0.01, format="%.2f"
                 )
-                description = st.text_input("Descripción")
-                category = st.text_input("Categoría (opcional)")
+                description = st.text_input("Descripción / concepto")
+                st.caption(
+                    "**Ingreso:** elegí el negocio. **Egreso:** elegí el rubro del gasto (solo rellená el que corresponda)."
+                )
+                col_biz, col_cat = st.columns(2)
+                with col_biz:
+                    biz_sel = st.selectbox(
+                        "Negocio (ingresos)",
+                        INCOME_BUSINESSES,
+                        index=0,
+                        help="Movi Motors, delivery, Zemog…",
+                    )
+                    biz_other = st.text_input("Si negocio = Otro, escribí el nombre")
+                with col_cat:
+                    cat_sel = st.selectbox(
+                        "Rubro del gasto (egresos)",
+                        EXPENSE_CATEGORIES,
+                        index=0,
+                        help="Casa, carro, hijos…",
+                    )
+                    cat_other = st.text_input("Si rubro = Otro, escribí el nombre")
                 if st.form_submit_button("Guardar"):
-                    sb.table("kf_transaction").insert(
-                        {
-                            "account_id": account_id,
-                            "user_id": user["id"],
-                            "tx_type": tx_type,
-                            "amount": float(amount),
-                            "tx_date": tx_date.isoformat(),
-                            "description": description.strip() or "(sin descripción)",
-                            "category": category.strip() or None,
-                        }
-                    ).execute()
-                    st.success("Movimiento guardado.")
-                    st.rerun()
+                    if tx_type == "ingreso":
+                        business = _pick_list_value(biz_sel, biz_other)
+                        category = None
+                    else:
+                        business = None
+                        category = _pick_list_value(cat_sel, cat_other)
+                    row_ins: dict[str, Any] = {
+                        "account_id": account_id,
+                        "user_id": user["id"],
+                        "tx_type": tx_type,
+                        "amount": float(amount),
+                        "tx_date": tx_date.isoformat(),
+                        "description": description.strip() or "(sin descripción)",
+                        "category": category,
+                        "business": business,
+                    }
+                    try:
+                        sb.table("kf_transaction").insert(row_ins).execute()
+                    except Exception as e:
+                        st.error(
+                            "No se pudo guardar. Si ves error de columna `business`, "
+                            "ejecutá en Supabase `supabase/patch_003_business.sql`."
+                        )
+                        st.code(str(e))
+                    else:
+                        st.success("Movimiento guardado.")
+                        st.rerun()
 
         with t2:
             st.write(
@@ -492,8 +580,19 @@ def main() -> None:
         else:
             df = pd.DataFrame(txs)
             df["registró"] = df["user_id"].map(lambda x: umap.get(str(x), "—") if pd.notna(x) else "—")
+            if "business" not in df.columns:
+                df["business"] = None
             show = df[
-                ["tx_date", "tx_type", "amount", "description", "category", "registró", "id"]
+                [
+                    "tx_date",
+                    "tx_type",
+                    "amount",
+                    "business",
+                    "category",
+                    "description",
+                    "registró",
+                    "id",
+                ]
             ].copy()
             show["amount"] = show["amount"].apply(lambda x: f"{float(x):,.2f}")
             st.dataframe(show, use_container_width=True, hide_index=True)

@@ -20,11 +20,21 @@ def _dec(x: Any) -> Decimal:
 def txs_to_dataframe(txs: list[dict[str, Any]]) -> pd.DataFrame:
     if not txs:
         return pd.DataFrame(
-            columns=["tx_date", "tx_type", "amount", "description", "category", "user_id"]
+            columns=[
+                "tx_date",
+                "tx_type",
+                "amount",
+                "description",
+                "category",
+                "business",
+                "user_id",
+            ]
         )
     df = pd.DataFrame(txs)
     df["tx_date"] = pd.to_datetime(df["tx_date"], errors="coerce").dt.date
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+    if "business" not in df.columns:
+        df["business"] = None
     return df
 
 
@@ -136,8 +146,14 @@ def render_finance_dashboard(
     yearly = dff.groupby("yr", as_index=False).agg(ingreso=("ing", "sum"), egreso=("egr", "sum"))
     yearly["neto"] = yearly["ingreso"] - yearly["egreso"]
 
-    tab_d, tab_m, tab_y, tab_cat = st.tabs(
-        ["Diario", "Mensual", "Anual", "Por categoría"]
+    tab_d, tab_m, tab_y, tab_neg, tab_cat = st.tabs(
+        [
+            "Diario",
+            "Mensual",
+            "Anual",
+            "Ingresos por negocio",
+            "Gastos por categoría",
+        ]
     )
 
     layout = dict(
@@ -200,11 +216,38 @@ def render_finance_dashboard(
         fig_y.update_layout(**layout, title="Totales por año", barmode="group")
         st.plotly_chart(fig_y, use_container_width=True)
 
+    with tab_neg:
+        ing_df = dff[dff["tx_type"] == "ingreso"].copy()
+        ing_df["business"] = ing_df["business"].fillna("(sin negocio)")
+        if ing_df.empty:
+            st.caption("No hay ingresos en el período.")
+        else:
+            agn = (
+                ing_df.groupby("business", as_index=False)["amount"]
+                .sum()
+                .sort_values("amount", ascending=False)
+            )
+            fig_n = go.Figure(
+                go.Bar(
+                    x=agn["amount"],
+                    y=agn["business"],
+                    orientation="h",
+                    marker=dict(color=agn["amount"], colorscale="Teal", showscale=False),
+                )
+            )
+            fig_n.update_layout(
+                **layout,
+                title="Ingresos por negocio / fuente",
+                xaxis_title=currency,
+                yaxis_title="",
+            )
+            st.plotly_chart(fig_n, use_container_width=True)
+
     with tab_cat:
         cat_df = dff[dff["tx_type"] == "egreso"].copy()
         cat_df["category"] = cat_df["category"].fillna("(sin categoría)")
         if cat_df.empty:
-            st.caption("No hay egresos con categoría en el período.")
+            st.caption("No hay egresos en el período.")
         else:
             agg = cat_df.groupby("category", as_index=False)["amount"].sum().sort_values(
                 "amount", ascending=False
@@ -219,7 +262,7 @@ def render_finance_dashboard(
             )
             fig_c.update_layout(
                 **layout,
-                title="Egresos por categoría",
+                title="Gastos por categoría (Casa, Carro, Hijos…)",
                 xaxis_title=currency,
                 yaxis_title="",
             )

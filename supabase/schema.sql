@@ -43,6 +43,7 @@ create table if not exists public.kf_transaction (
   tx_date date not null,
   description text not null default '',
   category text,
+  business text,
   created_at timestamptz not null default now()
 );
 
