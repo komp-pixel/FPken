@@ -71,7 +71,16 @@ def main() -> None:
         st.code(str(e))
         st.stop()
 
-    accounts = load_accounts(sb)
+    try:
+        accounts = load_accounts(sb)
+    except Exception:
+        st.error(
+            "No se pudieron leer las cuentas en Supabase. Suele pasar si:\n"
+            "- No ejecutaste `supabase/schema.sql` en este proyecto, o\n"
+            "- Usás la clave **anon** sin políticas RLS: ejecutá `supabase/patch_001_rls_policies.sql`, o\n"
+            "- Usá la clave **service_role** en los secrets de Streamlit (Settings → API)."
+        )
+        st.stop()
 
     if not accounts:
         st.subheader("Primera vez: crear tu cuenta (ej. BofA)")

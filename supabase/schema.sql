@@ -40,8 +40,24 @@ create index if not exists kf_transaction_account_date_idx
 alter table public.kf_account enable row level security;
 alter table public.kf_transaction enable row level security;
 
--- La app Streamlit usa la service_role key (bypass RLS).
--- Si más adelante usas anon + Auth, añade políticas aquí.
+-- Con la clave **anon** (PostgREST), sin políticas no se ve ninguna fila → error en la app.
+-- La clave **service_role** ignora RLS; igual estas políticas no molestan.
+-- Ojo: la clave anon no debe exponerse en frontends públicos; en Streamlit Cloud (solo servidor) es aceptable.
+drop policy if exists "kf_account_anon_all" on public.kf_account;
+create policy "kf_account_anon_all"
+  on public.kf_account for all to anon using (true) with check (true);
+
+drop policy if exists "kf_transaction_anon_all" on public.kf_transaction;
+create policy "kf_transaction_anon_all"
+  on public.kf_transaction for all to anon using (true) with check (true);
+
+drop policy if exists "kf_account_auth_all" on public.kf_account;
+create policy "kf_account_auth_all"
+  on public.kf_account for all to authenticated using (true) with check (true);
+
+drop policy if exists "kf_transaction_auth_all" on public.kf_transaction;
+create policy "kf_transaction_auth_all"
+  on public.kf_transaction for all to authenticated using (true) with check (true);
 
 comment on table public.kf_account is 'Cuentas bancarias / efectivo (saldo inicial desde Excel u otro origen).';
 comment on table public.kf_transaction is 'Ingresos y egresos asociados a una cuenta.';
