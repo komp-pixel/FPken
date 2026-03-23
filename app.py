@@ -25,7 +25,10 @@ from kf_constants import (
     INSTITUTION_WALLET,
     TRANSFER_TAGS,
 )
+from kf_bcv import render_bcv_reference
 from kf_dashboard import render_finance_dashboard
+from kf_fx_convert import all_balances_with_ves, resolve_ves_rates, to_ves
+from kf_p2p_binance import render_usdt_ves_p2p_reference
 from kf_reports import render_reports_page
 
 
@@ -910,6 +913,61 @@ def main() -> None:
         if len(accounts) == 1
         else st.sidebar.selectbox("Cuenta activa", options=list(opts.keys()), format_func=lambda i: opts[i])
     )
+
+    st.sidebar.divider()
+    st.sidebar.subheader("Saldos en bolívares")
+    _fx_choices: list[tuple[str, str]] = [
+        ("BCV oficial (promedio)", "bcv"),
+        ("P2P — comprar USDT (mediana)", "p2p_buy"),
+        ("P2P — vender USDT (mediana)", "p2p_sell"),
+        ("Manual: Bs × 1 USD o USDT", "manual"),
+    ]
+    _fx_labels = [t[0] for t in _fx_choices]
+    _fx_pick = st.sidebar.selectbox(
+        "Tasa para convertir saldos",
+        _fx_labels,
+        key="kf_fx_mode_label",
+        help="Una misma tasa aplica a USD y USDT como referencia; VES queda en Bs.",
+    )
+    _fx_mode = dict(_fx_choices)[_fx_pick]
+    _manual_bs: float | None = None
+    if _fx_mode == "manual":
+        _manual_bs = float(
+            st.sidebar.number_input(
+                "Bs por 1 USD o USDT",
+                min_value=0.0001,
+                value=400.0,
+                format="%.4f",
+                key="kf_fx_manual_bs",
+            )
+        )
+    _ves_u, _ves_t, _fx_caption = resolve_ves_rates(_fx_mode, _manual_bs)
+    st.sidebar.caption(_fx_caption)
+    _fx_detail = st.sidebar.checkbox(
+        "Desglose por cuenta (lee movimientos de todas)",
+        value=False,
+        key="kf_fx_detail_all",
+        help="Si tenés muchas cuentas o muchos movimientos, dejalo apagado y solo verás el equivalente VES de la cuenta activa en Movimientos.",
+    )
+    if _ves_u is not None and _ves_t is not None:
+        if _fx_detail:
+            _rows, _tot = all_balances_with_ves(
+                sb, accounts, load_transactions, compute_balance, _ves_u, _ves_t
+            )
+            st.sidebar.metric("Total patrimonio ≈ VES", f"{float(_tot):,.2f}")
+            st.sidebar.dataframe(
+                pd.DataFrame(_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.sidebar.caption(
+                "Activá «Desglose por cuenta» para total y tabla. "
+                "La cuenta activa igual muestra ≈ VES en la pestaña Movimientos."
+            )
+    else:
+        st.sidebar.warning("No hay tasa válida para convertir.")
+
     acc = next(a for a in accounts if str(a["id"]) == str(account_id))
     txs = load_transactions(sb, account_id)
     umap = load_user_map(sb)
@@ -923,6 +981,17 @@ def main() -> None:
     )
 
     with tab_dash:
+        st.markdown("### Cotizaciones (referencia)")
+        _bcv_col, _p2p_intro = st.columns([1, 2])
+        with _bcv_col:
+            render_bcv_reference()
+        with _p2p_intro:
+            st.caption(
+                "P2P: precios públicos en Binance; BCV: promedio oficial vía API pública. "
+                "No son cotizaciones de contrato."
+            )
+        render_usdt_ves_p2p_reference()
+        st.divider()
         try:
             render_finance_dashboard(
                 txs,
@@ -934,10 +1003,19 @@ def main() -> None:
             st.code(str(e))
 
     with tab_mov:
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Saldo calculado", f"{balance:,.2f} {acc.get('currency', 'USD')}")
         c2.metric("Saldo inicial", f'{_dec(acc.get("opening_balance")):,.2f}')
         c3.metric("Movimientos", len(txs))
+        if _ves_u is not None and _ves_t is not None:
+            _eq = to_ves(balance, str(acc.get("currency", "USD")), _ves_u, _ves_t)
+            c4.metric(
+                "Saldo ≈ VES",
+                f"{_eq:,.2f}",
+                help=f"Según tasa lateral: {_fx_caption[:120]}",
+            )
+        else:
+            c4.metric("Saldo ≈ VES", "—", help="Elegí una tasa válida en la barra lateral.")
 
         t1, t2, t3 = st.tabs(["Registrar", "Saldo inicial", "Importar Excel"])
 
