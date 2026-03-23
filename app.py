@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 from supabase import Client
 
+from kf_account_cards import render_payment_method_cards
 from kf_auth import gate_auth, logout
 from kf_constants import (
     ACCOUNT_KIND_LABELS,
@@ -136,56 +137,37 @@ def _nulls_for_kind(kind: str) -> dict[str, Any]:
     return {}
 
 
-def _render_account_detail(acc: dict[str, Any], kind: str) -> None:
-    st.caption(f"Clasificación: **{ACCOUNT_KIND_LABELS.get(kind, kind)}**")
-    if kind == "banco":
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(f"**Banco:** {acc.get('bank_name') or '—'}")
-            st.markdown(f"**Institución:** {acc.get('institution_kind') or '—'}")
-            st.markdown(f"**Nº cuenta / ref:** `{acc.get('account_number') or '—'}`")
-            st.markdown(f"**Routing / Swift:** {acc.get('routing_or_swift') or '—'}")
-        with c2:
-            st.markdown(f"**Titular:** {acc.get('holder_name') or '—'}")
-    elif kind == "wallet":
-        st.markdown(f"**Exchange / red:** {acc.get('bank_name') or acc.get('institution_kind') or '—'}")
-        st.markdown(f"**Dirección o UID:** `{acc.get('wallet_address') or '—'}`")
-        st.markdown(f"**Titular:** {acc.get('holder_name') or '—'}")
-    else:
-        st.markdown(f"**App:** {acc.get('institution_kind') or acc.get('bank_name') or '—'}")
-        st.markdown(f"**Usuario / email / tel.:** `{acc.get('zelle_email_or_phone') or '—'}`")
-        st.markdown(f"**Titular:** {acc.get('holder_name') or '—'}")
-    n = acc.get("notes") or ""
-    if str(n).strip():
-        st.text_area("Notas", value=str(n), height=72, disabled=True)
-
-
 def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
-    st.subheader("Registros por tipo (separados)")
+    st.subheader("Cuentas y métodos de pago")
     st.caption(
-        "**Banco** = cuenta en Banesco, BofA, Banca Amiga… "
-        "**Wallet** = Binance / USDT / on-chain (sin número de cuenta bancario). "
-        "**App** = Zinly, Zelle (pagos digitales; no es lo mismo que una cuenta corriente)."
+        "**Banco** = Banesco, BofA, Banca Amiga, Pago Móvil… "
+        "**Wallet** = Binance / USDT / on-chain. "
+        "**App** = Zinly, Zelle."
     )
     st.info(
         "SQL en Supabase: **`patch_004_accounts_reports.sql`** y **`patch_005_account_kind.sql`**."
     )
 
+    render_payment_method_cards(
+        accounts,
+        heading="Vista tarjeta (como métodos P2P)",
+        caption="Para **editar** un registro usá la sección **Editar** más abajo.",
+    )
+    st.divider()
+
     by_k: dict[str, list[dict[str, Any]]] = {"banco": [], "wallet": [], "app_pagos": []}
     for a in accounts:
         by_k[_infer_account_kind(a)].append(a)
 
+    st.markdown("### Dar de alta por tipo")
     for kind, title in (
         ("banco", "Cuentas bancarias"),
         ("wallet", "Wallets y crypto"),
         ("app_pagos", "Apps de pago (Zinly, Zelle…)"),
     ):
-        st.markdown(f"### {title}")
+        st.markdown(f"#### {title}")
         if not by_k[kind]:
-            st.write("Ningún registro aún.")
-        for a in sorted(by_k[kind], key=lambda x: str(x.get("label") or "")):
-            with st.expander(f"{a.get('label')} · {a.get('currency', '?')}", expanded=False):
-                _render_account_detail(a, kind)
+            st.caption("Ningún registro de este tipo todavía.")
 
         if kind == "banco":
             with st.expander("Agregar cuenta **bancaria**", expanded=False):
@@ -962,6 +944,12 @@ def main() -> None:
     )
 
     with tab_dash:
+        render_payment_method_cards(
+            accounts,
+            heading="Mis cuentas y métodos de pago",
+            caption="Misma vista que en la pestaña **Cuentas**; orden estilo métodos de pago P2P.",
+        )
+        st.divider()
         st.markdown("### Cotizaciones (referencia)")
         _bcv_col, _p2p_intro = st.columns([1, 2])
         with _bcv_col:
