@@ -5,6 +5,7 @@ Supabase: schema.sql + patch_002 si la base ya existía sin usuarios.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -65,6 +66,52 @@ def compute_balance(account: dict[str, Any], txs: list[dict[str, Any]]) -> Decim
     return base
 
 
+def _parse_money_cell(v: Any) -> float | None:
+    """Acepta número de Excel o texto tipo '$ 1.032,46' / '3.669,60'."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        if isinstance(v, float) and pd.isna(v):
+            return None
+        return float(v)
+    s = str(v).strip()
+    if not s or s.lower() in ("nan", "none", "-", ""):
+        return None
+    s = re.sub(r"[\$€\s]", "", s, flags=re.I)
+    if not s:
+        return None
+    try:
+        x = float(s)
+        return x
+    except ValueError:
+        pass
+    lc, lp = s.rfind(","), s.rfind(".")
+    if lc > lp:
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        s = s.replace(",", "")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _should_skip_row(desc: str, *, filter_noise: bool) -> bool:
+    t = (desc or "").strip().lower()
+    if not t:
+        return True
+    if not filter_noise:
+        return False
+    noise = (
+        "total",
+        "saldo al",
+        "revisado",
+        "total de kenny",
+        "total de",
+    )
+    return any(n in t for n in noise)
+
+
 def page_users_admin(sb: Client) -> None:
     st.subheader("Usuarios")
     st.caption("Solo administradores. Orlando y Kenny pueden tener cada uno su usuario.")
@@ -105,8 +152,7 @@ def import_excel_section(
 ) -> None:
     st.subheader("Importar desde Excel")
     st.write(
-        "Subí un `.xlsx` con tus columnas. Mapeá **fecha**, **monto** y **descripción**. "
-        "Si tenés columna **tipo** (ingreso/egreso), usala; si no, los montos **negativos** serán egresos."
+        "Formato tipo **FECHA / DESCRIPCION / INGRESO / EGRESO** (BofA Kenny) o una sola columna de monto."
     )
     f = st.file_uploader("Archivo Excel (.xlsx)", type=["xlsx"])
     if not f:
@@ -120,60 +166,144 @@ def import_excel_section(
         st.warning("El archivo está vacío.")
         return
     cols = list(raw.columns.astype(str))
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        col_fecha = st.selectbox("Columna fecha", ["—"] + cols, key="im_f")
-    with c2:
-        col_monto = st.selectbox("Columna monto", ["—"] + cols, key="im_m")
-    with c3:
-        col_desc = st.selectbox("Columna descripción", ["—"] + cols, key="im_d")
-    col_tipo = st.selectbox(
-        "Columna tipo (opcional: ingreso/egreso, I/E, +/−)", ["—"] + cols, key="im_t"
-    )
-    col_cat = st.selectbox("Columna categoría (opcional)", ["—"] + cols, key="im_c")
 
-    if col_fecha == "—" or col_monto == "—" or col_desc == "—":
-        st.info("Elegí las tres columnas obligatorias.")
-        st.dataframe(raw.head(15), use_container_width=True)
+    mode = st.radio(
+        "Formato del archivo",
+        [
+            "Dos columnas: Ingreso y Egreso (como tu Excel BofA)",
+            "Una columna de monto (+ tipo o signo)",
+        ],
+        horizontal=False,
+        key="im_mode",
+    )
+    dayfirst = st.checkbox(
+        "Fechas con día primero (03-01-2026 = 3 ene)", value=True, key="im_df"
+    )
+    filter_noise = st.checkbox(
+        "Omitir filas de totales / saldo / revisado", value=True, key="im_skip"
+    )
+
+    col_fecha = st.selectbox("Columna fecha", ["—"] + cols, key="im_f")
+    col_desc = st.selectbox("Columna descripción", ["—"] + cols, key="im_d")
+
+    work: pd.DataFrame | None = None
+
+    if mode.startswith("Dos columnas"):
+        col_in = st.selectbox("Columna INGRESO", ["—"] + cols, key="im_in")
+        col_eg = st.selectbox("Columna EGRESO", ["—"] + cols, key="im_eg")
+        col_cat = st.selectbox("Columna categoría (opcional)", ["—"] + cols, key="im_c2")
+
+        if col_fecha == "—" or col_desc == "—" or col_in == "—" or col_eg == "—":
+            st.info("Elegí fecha, descripción, ingreso y egreso.")
+            st.dataframe(raw.head(15), use_container_width=True)
+            return
+
+        dts = pd.to_datetime(raw[col_fecha], errors="coerce", dayfirst=dayfirst)
+        out_rows: list[dict[str, Any]] = []
+        for i in range(len(raw)):
+            desc = str(raw.iloc[i][col_desc]).strip()
+            if _should_skip_row(desc, filter_noise=filter_noise):
+                continue
+            td = dts.iloc[i]
+            if pd.isna(td):
+                continue
+            txd = td.date()
+            ing = _parse_money_cell(raw.iloc[i][col_in])
+            egr = _parse_money_cell(raw.iloc[i][col_eg])
+            cat = None
+            if col_cat != "—":
+                c = raw.iloc[i][col_cat]
+                if c is not None and str(c).strip():
+                    cat = str(c).strip()
+            if ing is not None and ing > 0:
+                out_rows.append(
+                    {
+                        "tx_date": txd,
+                        "tx_type": "ingreso",
+                        "amount": ing,
+                        "description": desc,
+                        "category": cat,
+                    }
+                )
+            if egr is not None and egr > 0:
+                out_rows.append(
+                    {
+                        "tx_date": txd,
+                        "tx_type": "egreso",
+                        "amount": egr,
+                        "description": desc,
+                        "category": cat,
+                    }
+                )
+        work = pd.DataFrame(out_rows) if out_rows else pd.DataFrame()
+
+    else:
+        col_monto = st.selectbox("Columna monto", ["—"] + cols, key="im_m")
+        col_tipo = st.selectbox(
+            "Columna tipo (opcional)", ["—"] + cols, key="im_t"
+        )
+        col_cat = st.selectbox("Columna categoría (opcional)", ["—"] + cols, key="im_c")
+
+        if col_fecha == "—" or col_monto == "—" or col_desc == "—":
+            st.info("Elegí fecha, monto y descripción.")
+            st.dataframe(raw.head(15), use_container_width=True)
+            return
+
+        dts = pd.to_datetime(raw[col_fecha], errors="coerce", dayfirst=dayfirst)
+        descs = raw[col_desc].astype(str)
+        amounts = [_parse_money_cell(x) for x in raw[col_monto]]
+
+        tmp: list[dict[str, Any]] = []
+        for i in range(len(raw)):
+            desc = descs.iloc[i].strip()
+            if _should_skip_row(desc, filter_noise=filter_noise):
+                continue
+            td = dts.iloc[i]
+            if pd.isna(td):
+                continue
+            amt = amounts[i]
+            if amt is None or amt == 0:
+                continue
+            tx_type = "ingreso"
+            if col_tipo != "—":
+                x = str(raw.iloc[i][col_tipo]).lower().strip()
+                if x in ("egreso", "e", "-", "out", "salida", "débito", "debito"):
+                    tx_type = "egreso"
+                elif x in ("ingreso", "i", "+", "entrada", "crédito", "credito"):
+                    tx_type = "ingreso"
+                else:
+                    tx_type = "egreso" if amt < 0 else "ingreso"
+            else:
+                tx_type = "egreso" if amt < 0 else "ingreso"
+            cat = None
+            if col_cat != "—":
+                c = raw.iloc[i][col_cat]
+                if c is not None and str(c).strip():
+                    cat = str(c).strip()
+            tmp.append(
+                {
+                    "tx_date": td.date(),
+                    "tx_type": tx_type,
+                    "amount": abs(float(amt)),
+                    "description": desc,
+                    "category": cat,
+                }
+            )
+        work = pd.DataFrame(tmp)
+
+    if work is None or work.empty:
+        st.warning("No quedaron filas para importar (revisá fechas, montos y filtros).")
+        st.dataframe(raw.head(20), use_container_width=True)
         return
 
-    work = pd.DataFrame(
-        {
-            "tx_date": pd.to_datetime(raw[col_fecha], errors="coerce").dt.date,
-            "amount_raw": pd.to_numeric(raw[col_monto], errors="coerce"),
-            "description": raw[col_desc].astype(str).fillna(""),
-        }
+    st.write(f"Vista previa: **{len(work)}** movimientos listos.")
+    st.dataframe(work.head(25), use_container_width=True)
+
+    st.info(
+        "**Saldo inicial:** si en el Excel el renglón «vienen» del 01/01/2026 es el arrastre del saldo, "
+        "podés poner **saldo inicial** = 0 y dejar que importe esa fila, **o** poner saldo inicial = 1.032,46 "
+        "al 31/12/2025 y **desmarcar** esa fila en Excel antes de exportar (para no duplicar)."
     )
-    if col_cat != "—":
-        work["category"] = raw[col_cat].astype(str)
-    else:
-        work["category"] = None
-
-    if col_tipo != "—":
-        tlow = raw[col_tipo].astype(str).str.lower().str.strip()
-        work["tx_type"] = tlow.map(
-            lambda x: "ingreso"
-            if x in ("ingreso", "i", "+", "in", "entrada", "credit", "crédito", "credito")
-            else "egreso"
-            if x in ("egreso", "e", "-", "out", "salida", "debit", "débito", "debito")
-            else ""
-        )
-        amb = work["tx_type"] == ""
-        if amb.any():
-            work.loc[amb, "tx_type"] = work.loc[amb, "amount_raw"].apply(
-                lambda v: "egreso" if v is not None and v < 0 else "ingreso"
-            )
-    else:
-        work["tx_type"] = work["amount_raw"].apply(
-            lambda v: "egreso" if v is not None and v < 0 else "ingreso"
-        )
-
-    work["amount"] = work["amount_raw"].abs()
-    work = work.dropna(subset=["tx_date", "amount_raw"])
-    work = work[work["amount"] > 0]
-
-    st.write(f"Vista previa: **{len(work)}** filas listas para importar.")
-    st.dataframe(work.head(20), use_container_width=True)
 
     if st.button("Confirmar importación a la cuenta actual", type="primary"):
         rows = []
@@ -188,6 +318,7 @@ def import_excel_section(
                     "description": (row["description"] or "")[:500] or "(importado)",
                     "category": (str(row["category"]).strip() or None)
                     if row.get("category") is not None
+                    and pd.notna(row.get("category"))
                     and str(row.get("category")).strip()
                     else None,
                 }
@@ -195,7 +326,7 @@ def import_excel_section(
         batch = 200
         for i in range(0, len(rows), batch):
             sb.table("kf_transaction").insert(rows[i : i + batch]).execute()
-        st.success(f"Importadas {len(rows)} filas (registrado por {display_name}).")
+        st.success(f"Importados {len(rows)} movimientos (registrado por {display_name}).")
         st.rerun()
 
 
