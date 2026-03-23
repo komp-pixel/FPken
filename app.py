@@ -15,14 +15,127 @@ import streamlit as st
 from supabase import Client
 
 from kf_auth import gate_auth, logout
-from kf_constants import EXPENSE_CATEGORIES, INCOME_BUSINESSES
+from kf_constants import (
+    CURRENCIES,
+    EXPENSE_CATEGORIES,
+    INCOME_BUSINESSES,
+    INSTITUTION_PRESETS,
+    TRANSFER_TAGS,
+)
 from kf_dashboard import render_finance_dashboard
+from kf_reports import render_reports_page
 
 
 def _pick_list_value(selected: str, other_text: str) -> str | None:
     if selected == "Otro":
         return other_text.strip() or None
     return selected
+
+
+def _amount_input_format(currency: str) -> tuple[float, str]:
+    if currency == "USDT":
+        return 0.000001, "%.6f"
+    return 0.01, "%.2f"
+
+
+def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
+    st.subheader("Cuentas, bancos y wallets")
+    st.caption(
+        "Registrá Banesco, Banca Amiga (VES), Binance (USDT), Zelle, etc. "
+        "Datos sensibles: usá la app en cuenta personal y no subas capturas con claves."
+    )
+    for a in sorted(accounts, key=lambda x: str(x.get("label") or "")):
+        cur = a.get("currency", "?")
+        with st.expander(f"{a.get('label')} · {cur}", expanded=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"**Institución (tipo):** {a.get('institution_kind') or '—'}")
+                st.markdown(f"**Banco (nombre):** {a.get('bank_name') or '—'}")
+                st.markdown(f"**Nº cuenta / referencia:** `{a.get('account_number') or '—'}`")
+                st.markdown(f"**Routing / Swift:** {a.get('routing_or_swift') or '—'}")
+            with c2:
+                st.markdown(f"**Titular:** {a.get('holder_name') or '—'}")
+                st.markdown(f"**Zelle (email o tel):** {a.get('zelle_email_or_phone') or '—'}")
+                w = a.get("wallet_address") or "—"
+                st.markdown(f"**Wallet / UID Binance:** `{w}`")
+            n = a.get("notes") or ""
+            if n.strip():
+                st.text_area("Notas (futuros, apalancamiento, recordatorios)", value=n, height=90, disabled=True)
+
+    st.divider()
+    with st.expander("Agregar cuenta nueva (VES, USDT, otra cuenta USD…)", expanded=False):
+        with st.form("add_acc"):
+            alabel = st.text_input("Nombre visible", placeholder="Banesco ahorro / Binance spot")
+            cur = st.selectbox("Moneda de la cuenta", CURRENCIES)
+            bank = st.text_input("Nombre banco o exchange", placeholder="Banesco / Binance")
+            ikind = st.selectbox("Tipo de institución", INSTITUTION_PRESETS)
+            iother = st.text_input("Si tipo = Otro, especificá")
+            holder = st.text_input("Titular")
+            acc_num = st.text_input("Número de cuenta / IBAN / ref (opcional)")
+            rout = st.text_input("Routing, ABA o Swift (opcional)")
+            zelle = st.text_input("Zelle: email o teléfono (opcional)")
+            wallet = st.text_input("Dirección wallet USDT o UID de exchange (opcional)")
+            anotes = st.text_area("Notas (futuros, estrategia, límites…)", height=72)
+            op = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f")
+            od = st.date_input("Fecha de ese saldo", value=date.today())
+            if st.form_submit_button("Crear cuenta"):
+                inst = _pick_list_value(ikind, iother) or ikind
+                sb.table("kf_account").insert(
+                    {
+                        "label": alabel.strip() or "Cuenta",
+                        "currency": cur,
+                        "bank_name": bank.strip() or None,
+                        "holder_name": holder.strip() or None,
+                        "institution_kind": inst,
+                        "account_number": acc_num.strip() or None,
+                        "routing_or_swift": rout.strip() or None,
+                        "zelle_email_or_phone": zelle.strip() or None,
+                        "wallet_address": wallet.strip() or None,
+                        "notes": anotes.strip() or None,
+                        "opening_balance": float(op),
+                        "opening_balance_date": od.isoformat(),
+                    }
+                ).execute()
+                st.success("Cuenta creada. Elegila en la barra lateral como **Cuenta activa**.")
+                st.rerun()
+
+    st.subheader("Editar cuenta seleccionada")
+    opts = {str(a["id"]): f'{a.get("label")} ({a.get("currency")})' for a in accounts}
+    pick = st.selectbox("Cuenta a editar", options=list(opts.keys()), format_func=lambda i: opts[i])
+    acc = next(x for x in accounts if str(x["id"]) == pick)
+    with st.form("edit_acc"):
+        elabel = st.text_input("Nombre visible", value=str(acc.get("label") or ""))
+        ecur = st.selectbox("Moneda", CURRENCIES, index=max(0, CURRENCIES.index(acc["currency"])) if acc.get("currency") in CURRENCIES else 0)
+        ebank = st.text_input("Banco o exchange", value=str(acc.get("bank_name") or ""))
+        kinds = INSTITUTION_PRESETS
+        ik0 = acc.get("institution_kind") or "Otro"
+        ei_idx = kinds.index(ik0) if ik0 in kinds else 0
+        ei = st.selectbox("Tipo institución", kinds, index=ei_idx)
+        ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in kinds else str(ik0))
+        eholder = st.text_input("Titular", value=str(acc.get("holder_name") or ""))
+        enum = st.text_input("Nº cuenta / ref", value=str(acc.get("account_number") or ""))
+        erout = st.text_input("Routing / Swift", value=str(acc.get("routing_or_swift") or ""))
+        ezelle = st.text_input("Zelle", value=str(acc.get("zelle_email_or_phone") or ""))
+        ewallet = st.text_input("Wallet / UID", value=str(acc.get("wallet_address") or ""))
+        enotes = st.text_area("Notas", value=str(acc.get("notes") or ""), height=80)
+        if st.form_submit_button("Guardar cambios"):
+            inst_e = _pick_list_value(ei, ei_other) or ei
+            sb.table("kf_account").update(
+                {
+                    "label": elabel.strip() or "Cuenta",
+                    "currency": ecur,
+                    "bank_name": ebank.strip() or None,
+                    "institution_kind": inst_e,
+                    "holder_name": eholder.strip() or None,
+                    "account_number": enum.strip() or None,
+                    "routing_or_swift": erout.strip() or None,
+                    "zelle_email_or_phone": ezelle.strip() or None,
+                    "wallet_address": ewallet.strip() or None,
+                    "notes": enotes.strip() or None,
+                }
+            ).eq("id", pick).execute()
+            st.success("Cuenta actualizada.")
+            st.rerun()
 
 
 def get_supabase() -> Client:
@@ -404,7 +517,9 @@ def main() -> None:
             logout()
             st.rerun()
         st.divider()
-        st.caption("Usá las pestañas **Dashboard · Movimientos · Usuarios** en la página principal.")
+        st.caption(
+            "Pestañas: **Dashboard · Movimientos · Cuentas · Reportes · Usuarios** (área principal)."
+        )
 
     try:
         accounts = load_accounts(sb)
@@ -420,27 +535,40 @@ def main() -> None:
             "Usuario listo. **Ahora creá la cuenta del banco** (BofA) con el formulario de abajo; "
             "sin eso no hay Dashboard ni movimientos."
         )
-        st.subheader("Cuenta bancaria (obligatorio)")
+        st.subheader("Primera cuenta (obligatorio para continuar)")
         with st.form("new_account"):
             label = st.text_input("Nombre de la cuenta", value="BofA — Orlando Linares")
-            bank = st.text_input("Banco", value="Bank of America")
+            cur0 = st.selectbox("Moneda", CURRENCIES, index=0)
+            bank = st.text_input("Banco / exchange", value="Bank of America")
+            ikind = st.selectbox("Tipo", INSTITUTION_PRESETS, index=0)
+            iother = st.text_input("Si tipo = Otro, especificá")
             holder = st.text_input("Titular", value="Orlando Linares")
+            acc_num = st.text_input("Nº cuenta / ref (opcional)")
+            rout = st.text_input("Routing / Swift (opcional)")
+            zelle = st.text_input("Zelle email/tel (opcional)")
+            wallet = st.text_input("Wallet USDT / UID (opcional)")
             opening = st.number_input(
-                "Saldo inicial (desde tu Excel)",
-                min_value=-1e12,
+                "Saldo inicial",
+                min_value=-1e15,
                 value=0.0,
                 step=0.01,
-                format="%.2f",
+                format="%.8f",
             )
             ob_date = st.date_input("Fecha de ese saldo", value=date.today())
             notes = st.text_area("Notas (opcional)", height=68)
             if st.form_submit_button("Crear cuenta"):
+                inst = _pick_list_value(ikind, iother) or ikind
                 sb.table("kf_account").insert(
                     {
                         "label": label.strip() or "Cuenta",
                         "bank_name": bank.strip() or None,
                         "holder_name": holder.strip() or None,
-                        "currency": "USD",
+                        "currency": cur0,
+                        "institution_kind": inst,
+                        "account_number": acc_num.strip() or None,
+                        "routing_or_swift": rout.strip() or None,
+                        "zelle_email_or_phone": zelle.strip() or None,
+                        "wallet_address": wallet.strip() or None,
                         "opening_balance": float(opening),
                         "opening_balance_date": ob_date.isoformat(),
                         "notes": notes.strip() or None,
@@ -464,7 +592,9 @@ def main() -> None:
     st.title("Kenny Finanzas")
     st.caption("Cuenta compartida · cada movimiento queda registrado con tu usuario")
 
-    tab_dash, tab_mov, tab_usr = st.tabs(["Dashboard", "Movimientos", "Usuarios"])
+    tab_dash, tab_mov, tab_acc, tab_rep, tab_usr = st.tabs(
+        ["Dashboard", "Movimientos", "Cuentas", "Reportes", "Usuarios"]
+    )
 
     with tab_dash:
         try:
@@ -486,6 +616,9 @@ def main() -> None:
         t1, t2, t3 = st.tabs(["Registrar", "Saldo inicial", "Importar Excel"])
 
         with t1:
+            acur = str(acc.get("currency", "USD"))
+            step_f, fmt_f = _amount_input_format(acur)
+            st.caption(f"Movimientos en **{acur}** para la cuenta activa (cambiala en la barra lateral).")
             with st.form("tx"):
                 col_a, col_b = st.columns(2)
                 with col_a:
@@ -493,7 +626,11 @@ def main() -> None:
                 with col_b:
                     tx_date = st.date_input("Fecha", value=date.today())
                 amount = st.number_input(
-                    "Monto", min_value=0.01, value=10.0, step=0.01, format="%.2f"
+                    f"Monto principal ({acur})",
+                    min_value=float(step_f),
+                    value=10.0 if acur != "USDT" else 0.01,
+                    step=float(step_f),
+                    format=fmt_f,
                 )
                 description = st.text_input("Descripción / concepto")
                 st.caption(
@@ -516,6 +653,19 @@ def main() -> None:
                         help="Casa, carro, hijos…",
                     )
                     cat_other = st.text_input("Si rubro = Otro, escribí el nombre")
+                tag_opts = ["(ninguna)"] + TRANSFER_TAGS
+                tag_sel = st.selectbox("Etiqueta (ej. Zelle→Binance, futuros)", tag_opts)
+                tag_other = st.text_input("Texto si usás etiqueta «Otro»")
+                fee_amt = st.number_input(
+                    "Comisión / fee del movimiento (opcional)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=float(step_f),
+                    format=fmt_f,
+                )
+                fee_cur_opts = list(dict.fromkeys([acur, "USD", "USDT", "VES"]))
+                fee_cur = st.selectbox("Moneda de la comisión", fee_cur_opts)
+                tx_notes = st.text_area("Notas del movimiento (opcional)", height=60)
                 if st.form_submit_button("Guardar"):
                     if tx_type == "ingreso":
                         business = _pick_list_value(biz_sel, biz_other)
@@ -523,6 +673,12 @@ def main() -> None:
                     else:
                         business = None
                         category = _pick_list_value(cat_sel, cat_other)
+                    if tag_sel == "(ninguna)":
+                        transfer_tag = None
+                    elif tag_sel == "Otro":
+                        transfer_tag = tag_other.strip() or None
+                    else:
+                        transfer_tag = tag_sel
                     row_ins: dict[str, Any] = {
                         "account_id": account_id,
                         "user_id": user["id"],
@@ -532,13 +688,18 @@ def main() -> None:
                         "description": description.strip() or "(sin descripción)",
                         "category": category,
                         "business": business,
+                        "transfer_tag": transfer_tag,
+                        "transaction_notes": tx_notes.strip() or None,
                     }
+                    if fee_amt and float(fee_amt) > 0:
+                        row_ins["fee_amount"] = float(fee_amt)
+                        row_ins["fee_currency"] = fee_cur
                     try:
                         sb.table("kf_transaction").insert(row_ins).execute()
                     except Exception as e:
                         st.error(
-                            "No se pudo guardar. Si ves error de columna `business`, "
-                            "ejecutá en Supabase `supabase/patch_003_business.sql`."
+                            "No se pudo guardar. Ejecutá en Supabase los parches: "
+                            "`patch_003_business.sql` y `patch_004_accounts_reports.sql`."
                         )
                         st.code(str(e))
                     else:
@@ -580,27 +741,42 @@ def main() -> None:
         else:
             df = pd.DataFrame(txs)
             df["registró"] = df["user_id"].map(lambda x: umap.get(str(x), "—") if pd.notna(x) else "—")
-            if "business" not in df.columns:
-                df["business"] = None
+            for col in ("business", "fee_amount", "transfer_tag", "transaction_notes"):
+                if col not in df.columns:
+                    df[col] = None
             show = df[
                 [
                     "tx_date",
                     "tx_type",
                     "amount",
+                    "fee_amount",
                     "business",
                     "category",
+                    "transfer_tag",
                     "description",
                     "registró",
                     "id",
                 ]
             ].copy()
-            show["amount"] = show["amount"].apply(lambda x: f"{float(x):,.2f}")
+            _prec = 6 if str(acc.get("currency")) == "USDT" else 2
+            show["amount"] = show["amount"].apply(
+                lambda x, p=_prec: f"{float(x):,.{p}f}"
+            )
+            show["fee_amount"] = show["fee_amount"].apply(
+                lambda x: f"{float(x):,.6f}" if pd.notna(x) and x is not None and float(x) > 0 else "—"
+            )
             st.dataframe(show, use_container_width=True, hide_index=True)
             del_id = st.text_input("Eliminar por ID (uuid)", placeholder="…")
             if st.button("Eliminar") and del_id.strip():
                 sb.table("kf_transaction").delete().eq("id", del_id.strip()).execute()
                 st.success("Eliminado.")
                 st.rerun()
+
+    with tab_acc:
+        page_accounts(sb, accounts)
+
+    with tab_rep:
+        render_reports_page(sb, accounts, umap)
 
     with tab_usr:
         if user.get("is_admin"):

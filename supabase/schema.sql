@@ -16,9 +16,14 @@ create table if not exists public.kf_account (
   bank_name text,
   holder_name text,
   currency text not null default 'USD',
-  opening_balance numeric(14, 2) not null default 0,
+  opening_balance numeric(20, 8) not null default 0,
   opening_balance_date date not null default (current_date),
   notes text,
+  institution_kind text,
+  account_number text,
+  routing_or_swift text,
+  wallet_address text,
+  zelle_email_or_phone text,
   created_at timestamptz not null default now()
 );
 
@@ -39,11 +44,15 @@ create table if not exists public.kf_transaction (
   account_id uuid not null references public.kf_account (id) on delete cascade,
   user_id uuid references public.kf_users (id) on delete set null,
   tx_type text not null check (tx_type in ('ingreso', 'egreso')),
-  amount numeric(14, 2) not null check (amount > 0),
+  amount numeric(20, 8) not null check (amount > 0),
   tx_date date not null,
   description text not null default '',
   category text,
   business text,
+  fee_amount numeric(20, 8),
+  fee_currency text,
+  transaction_notes text,
+  transfer_tag text,
   created_at timestamptz not null default now()
 );
 

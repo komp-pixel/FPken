@@ -14,7 +14,7 @@ App Streamlit para registrar **ingresos** y **egresos** (por ejemplo cuenta BofA
 
 1. Creá un **proyecto nuevo** en [Supabase](https://supabase.com) solo para finanzas personales.
 2. En **SQL Editor**, ejecutá **únicamente** `supabase/schema.sql` de este repositorio.
-3. Si la base es **antigua** (sin políticas RLS): `patch_001_rls_policies.sql`. Para **usuarios y login**: `patch_002_users_auth.sql`. Para **origen de ingresos (negocio)**: `patch_003_business.sql` (columna `business` en movimientos).
+3. Parches según tu caso: `patch_001_rls_policies.sql`, `patch_002_users_auth.sql`, `patch_003_business.sql`, `patch_004_accounts_reports.sql` (datos de cuenta, comisiones, USDT/VES, reportes PDF).
 4. La app pide **primer administrador** la primera vez; después puede crear usuarios (Orlando, Kenny, etc.). **Importar Excel**: pestaña Movimientos → Importar (mapeo de columnas).
 
 ## 2. Secretos locales
