@@ -87,11 +87,17 @@ def _field_tuples(acc: dict, kind: str) -> list[tuple[str, str]]:
         ]
 
     if kind == "wallet":
-        return [
+        out: list[tuple[str, str]] = [
             ("Exchange / red", h(acc.get("bank_name") or acc.get("institution_kind"))),
-            ("Dirección o UID", h(acc.get("wallet_address"))),
+            ("UID del exchange", h(acc.get("exchange_uid"))),
+            ("Pay ID", h(acc.get("pay_id"))),
+            ("Red de depósito", h(acc.get("deposit_network"))),
+            ("Dirección de depósito (on-chain)", h(acc.get("deposit_address"))),
+            ("Memo / Tag", h(acc.get("deposit_memo"))),
+            ("Referencia extra", h(acc.get("wallet_address"))),
             ("Titular", h(acc.get("holder_name"))),
         ]
+        return [(a, b) for a, b in out if b != "—"]
 
     if _is_pago_movil(acc):
         return [
@@ -175,6 +181,13 @@ _CARD_STYLE = """
     color: #1a1c24;
     word-break: break-word;
 }
+.kf-pay-card-wrap.kf-interactive .kf-pay-card {
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.kf-pay-card-wrap.kf-interactive .kf-pay-card:hover {
+    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.14);
+    border-color: rgba(59, 130, 246, 0.35);
+}
 </style>
 """
 
@@ -205,9 +218,10 @@ def _card_html(acc: dict, kind: str) -> str:
 """
 
 
-def _render_card(acc: dict, kind: str) -> None:
+def _render_card(acc: dict, kind: str, *, interactive: bool = False) -> None:
+    cls = "kf-pay-card-wrap kf-interactive" if interactive else "kf-pay-card-wrap"
     st.markdown(
-        f'<div class="kf-pay-card-wrap">{_card_html(acc, kind)}</div>',
+        f'<div class="{cls}">{_card_html(acc, kind)}</div>',
         unsafe_allow_html=True,
     )
     n = str(acc.get("notes") or "").strip()
@@ -220,6 +234,7 @@ def render_payment_method_cards(
     *,
     heading: str = "Mis cuentas y métodos de pago",
     caption: str | None = None,
+    edit_select_state_key: str = "kf_accounts_edit_select",
 ) -> None:
     """Lista de cuentas como tarjetas horizontales (orden: apps → banco → wallet)."""
     if not accounts:
@@ -234,10 +249,26 @@ def render_payment_method_cards(
         "Para **cédula / teléfono** en Pago Móvil usá **Nº cuenta** y **Routing** (teléfono) "
         "en el alta bancaria, o editá en **Cuentas**."
     )
+    st.caption(
+        "**Editar:** debajo de cada tarjeta hay un botón (Streamlit no puede hacer clic "
+        "directamente sobre el HTML de la tarjeta)."
+    )
 
     st.markdown(_CARD_STYLE, unsafe_allow_html=True)
 
     ordered = sorted(accounts, key=_sort_key)
     for acc in ordered:
         k = infer_account_kind(acc)
-        _render_card(acc, k)
+        _render_card(acc, k, interactive=True)
+        aid = str(acc.get("id") or "").strip()
+        if not aid:
+            continue
+        short = str(acc.get("label") or "Cuenta")[:42]
+        if st.button(
+            f"✏️ Editar · {short}",
+            key=f"kf_card_edit_open_{aid}",
+            use_container_width=True,
+            type="secondary",
+        ):
+            st.session_state[edit_select_state_key] = aid
+            st.rerun()
