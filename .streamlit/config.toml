@@ -4,3 +4,5 @@ primaryColor = "#1f77b4"
 
 [server]
 headless = true
+
+# Móvil: menú (☰) para barra lateral, atajos de cuenta y tasa VES.

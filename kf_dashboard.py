@@ -127,6 +127,54 @@ def render_finance_dashboard(
             unsafe_allow_html=True,
         )
 
+    if len(df):
+        first_m = date(today.year, today.month, 1)
+        last_pm = first_m - timedelta(days=1)
+        first_pm = date(last_pm.year, last_pm.month, 1)
+        m_cur = (df["tx_date"] >= first_m) & (df["tx_date"] <= today)
+        m_prv = (df["tx_date"] >= first_pm) & (df["tx_date"] <= last_pm)
+        cur = df.loc[m_cur]
+        prv = df.loc[m_prv]
+        ing_c = float(cur[cur["tx_type"] == "ingreso"]["amount"].sum())
+        egr_c = float(cur[cur["tx_type"] == "egreso"]["amount"].sum())
+        net_c = ing_c - egr_c
+        ing_p = float(prv[prv["tx_type"] == "ingreso"]["amount"].sum())
+        egr_p = float(prv[prv["tx_type"] == "egreso"]["amount"].sum())
+        net_p = ing_p - egr_p
+
+        def _pct_delta(new_v: float, old_v: float) -> str | None:
+            if old_v == 0:
+                return None
+            return f"{((new_v - old_v) / abs(old_v) * 100):+.1f}% vs mes ant."
+
+        st.markdown("##### Visión del dinero · mes en curso vs mes anterior")
+        st.caption(
+            f"Mes actual: {first_m.isoformat()} → {today.isoformat()} · "
+            f"Mes anterior: {first_pm.isoformat()} → {last_pm.isoformat()} · moneda **{currency}**"
+        )
+        v1, v2, v3 = st.columns(3)
+        with v1:
+            st.metric(
+                "Ingresos (mes actual)",
+                f"{ing_c:,.2f}",
+                delta=_pct_delta(ing_c, ing_p),
+                help=f"Mes anterior: {ing_p:,.2f}",
+            )
+        with v2:
+            st.metric(
+                "Egresos (mes actual)",
+                f"{egr_c:,.2f}",
+                delta=_pct_delta(egr_c, egr_p),
+                help=f"Mes anterior: {egr_p:,.2f}",
+            )
+        with v3:
+            st.metric(
+                "Neto (mes actual)",
+                f"{net_c:,.2f}",
+                delta=_pct_delta(net_c, net_p),
+                help=f"Mes anterior: {net_p:,.2f}",
+            )
+
     if dff.empty:
         st.info("No hay movimientos en el período elegido.")
         return

@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date
+import io
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -907,8 +908,120 @@ def import_excel_section(
             st.rerun()
 
 
+def _inject_responsive_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        @media (max-width: 768px) {
+            .block-container {
+                padding-left: 0.85rem !important;
+                padding-right: 0.85rem !important;
+            }
+        }
+        div[data-testid="stVerticalBlock"] button { min-height: 2.75rem; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _pick_account_id_sidebar(opts: dict[str, str]) -> str:
+    keys = list(opts.keys())
+    if not keys:
+        return ""
+    if len(keys) == 1:
+        return keys[0]
+    if (
+        st.session_state.get("kf_sidebar_account") is None
+        or st.session_state.get("kf_sidebar_account") not in opts
+    ):
+        st.session_state.kf_sidebar_account = keys[0]
+    st.sidebar.caption("Atajos · misma lista que «Cuenta activa»")
+    for row_start in range(0, len(keys), 2):
+        c_a, c_b = st.sidebar.columns(2)
+        with c_a:
+            k = keys[row_start]
+            lab = str(opts[k])
+            short = (lab[:16] + "…") if len(lab) > 18 else lab
+            if st.button(short, key=f"kf_accsh_{k}", use_container_width=True):
+                st.session_state.kf_sidebar_account = k
+                st.rerun()
+        with c_b:
+            if row_start + 1 < len(keys):
+                k2 = keys[row_start + 1]
+                lab2 = str(opts[k2])
+                short2 = (lab2[:16] + "…") if len(lab2) > 18 else lab2
+                if st.button(short2, key=f"kf_accsh_{k2}", use_container_width=True):
+                    st.session_state.kf_sidebar_account = k2
+                    st.rerun()
+    return str(
+        st.sidebar.selectbox(
+            "Cuenta activa",
+            options=keys,
+            format_func=lambda x: opts[x],
+            key="kf_sidebar_account",
+        )
+    )
+
+
+def _safe_export_filename_part(s: str) -> str:
+    t = re.sub(r"[^\w\-]+", "_", (s or "").strip(), flags=re.I).strip("_")
+    return (t[:36] if t else "cuenta")
+
+
+def _transactions_export_dataframe(
+    txs: list[dict[str, Any]],
+    umap: dict[str, str],
+    opts: dict[str, str],
+    date_from: date,
+    date_to: date,
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for t in txs:
+        td = t.get("tx_date")
+        if td is None:
+            continue
+        try:
+            d = date.fromisoformat(str(td)[:10])
+        except ValueError:
+            continue
+        if d < date_from or d > date_to:
+            continue
+        cid = str(t.get("counterpart_account_id") or "").strip()
+        contra = opts.get(cid, cid or "—")
+        rows.append(
+            {
+                "fecha": d.isoformat(),
+                "tipo": t.get("tx_type"),
+                "monto": t.get("amount"),
+                "comision": t.get("fee_amount"),
+                "moneda_comision": t.get("fee_currency"),
+                "negocio": t.get("business"),
+                "rubro": t.get("category"),
+                "etiqueta": t.get("transfer_tag"),
+                "cuenta_relacionada": contra,
+                "descripcion": t.get("description"),
+                "notas": t.get("transaction_notes"),
+                "registro_usuario": umap.get(str(t.get("user_id")), "—"),
+                "id": str(t.get("id", "")),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _df_to_xlsx_bytes(df: pd.DataFrame) -> bytes:
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Movimientos")
+    return buf.getvalue()
+
+
 def main() -> None:
-    st.set_page_config(page_title="Kenny Finanzas", layout="wide")
+    st.set_page_config(
+        page_title="Kenny Finanzas",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
     try:
         sb = get_supabase()
     except Exception as e:
@@ -923,6 +1036,8 @@ def main() -> None:
     user = gate_auth(sb)
     if not user:
         return
+
+    _inject_responsive_styles()
 
     with st.sidebar:
         st.markdown(f"**{user['display_name']}**  \n`{user['username']}`")
@@ -1051,11 +1166,7 @@ def main() -> None:
         f'{ACCOUNT_KIND_LABELS.get(_infer_account_kind(a), "?")}'
         for a in accounts
     }
-    account_id = (
-        list(opts.keys())[0]
-        if len(accounts) == 1
-        else st.sidebar.selectbox("Cuenta activa", options=list(opts.keys()), format_func=lambda i: opts[i])
-    )
+    account_id = _pick_account_id_sidebar(opts)
 
     st.sidebar.divider()
     st.sidebar.subheader("Tasa (bolívares)")
@@ -1165,7 +1276,9 @@ def main() -> None:
         else:
             c4.metric("Saldo ≈ VES", "—", help="Elegí una tasa válida en la barra lateral.")
 
-        t1, t2, t3 = st.tabs(["Registrar", "Saldo inicial", "Importar Excel"])
+        t1, t_tr, t2, t3 = st.tabs(
+            ["Registrar", "Traspaso", "Saldo inicial", "Importar Excel"]
+        )
 
         with t1:
             st.caption(
@@ -1274,6 +1387,139 @@ def main() -> None:
                         st.success("Movimiento guardado.")
                         st.rerun()
 
+        with t_tr:
+            st.caption(
+                "**Egreso** en origen e **ingreso** en destino. "
+                "Si las monedas **no** coinciden, cargá cuánto sale y cuánto entra (P2P, fees, tipo de cambio)."
+            )
+            _opt_tr = list(opts.keys())
+            _tr_to_idx = 1 if len(_opt_tr) > 1 else 0
+            with st.form("tx_traspaso_fp"):
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    fid = st.selectbox(
+                        "Origen (egreso)",
+                        _opt_tr,
+                        index=0,
+                        format_func=lambda i: opts[i],
+                        key="kf_tr_from_fp",
+                    )
+                with fc2:
+                    tid = st.selectbox(
+                        "Destino (ingreso)",
+                        _opt_tr,
+                        index=_tr_to_idx,
+                        format_func=lambda i: opts[i],
+                        key="kf_tr_to_fp",
+                    )
+                tx_date_tr = st.date_input("Fecha", value=date.today(), key="txtr_d_fp")
+                desc_tr = st.text_input(
+                    "Descripción (ej. P2P Zelle → Binance)",
+                    key="txtr_desc_fp",
+                )
+                acc_fr = next(a for a in accounts if str(a["id"]) == str(fid))
+                acc_to = next(a for a in accounts if str(a["id"]) == str(tid))
+                cur_fr = str(acc_fr.get("currency", "USD"))
+                cur_to = str(acc_to.get("currency", "USD"))
+                st.caption(f"Moneda origen **{cur_fr}** → Moneda destino **{cur_to}**")
+                if cur_fr == cur_to:
+                    m_rec = st.number_input(
+                        f"Monto que **entra** en destino ({cur_to})",
+                        min_value=0.00000001,
+                        value=10.0 if cur_to != "USDT" else 0.01,
+                        step=_amount_input_format(cur_to)[0],
+                        format=_amount_input_format(cur_to)[1],
+                        key="txtr_rec_fp",
+                    )
+                    m_fee = st.number_input(
+                        f"Comisión / diferencia (sale del origen, {cur_fr}; no suma al destino)",
+                        min_value=0.0,
+                        value=0.0,
+                        step=_amount_input_format(cur_fr)[0],
+                        format=_amount_input_format(cur_fr)[1],
+                        key="txtr_fee_fp",
+                    )
+                    m_send = float(m_rec) + float(m_fee)
+                else:
+                    m_send = float(
+                        st.number_input(
+                            f"Monto que **sale** del origen ({cur_fr})",
+                            min_value=0.00000001,
+                            value=10.0 if cur_fr != "USDT" else 0.01,
+                            step=_amount_input_format(cur_fr)[0],
+                            format=_amount_input_format(cur_fr)[1],
+                            key="txtr_send_fp",
+                        )
+                    )
+                    m_rec = float(
+                        st.number_input(
+                            f"Monto que **entra** al destino ({cur_to})",
+                            min_value=0.00000001,
+                            value=10.0 if cur_to != "USDT" else 0.01,
+                            step=_amount_input_format(cur_to)[0],
+                            format=_amount_input_format(cur_to)[1],
+                            key="txtr_recv_fp",
+                        )
+                    )
+                tx_notes_tr = st.text_area("Notas (opcional)", height=40, key="txtr_nt_fp")
+                if st.form_submit_button("Registrar traspaso"):
+                    if str(fid) == str(tid):
+                        st.error("Origen y destino no pueden ser la misma cuenta.")
+                    else:
+                        gid = str(uuid.uuid4())
+                        lbl_f = str(acc_fr.get("label") or "Origen")
+                        lbl_t = str(acc_to.get("label") or "Destino")
+                        base_desc = (desc_tr.strip() or "Traspaso interno")[:200]
+                        row_out: dict[str, Any] = {
+                            "account_id": str(fid),
+                            "user_id": user["id"],
+                            "tx_type": "egreso",
+                            "amount": float(m_send),
+                            "tx_date": tx_date_tr.isoformat(),
+                            "description": f"{base_desc} → {lbl_t}",
+                            "category": None,
+                            "business": None,
+                            "transfer_tag": "Traspaso interno",
+                            "transaction_notes": tx_notes_tr.strip() or None,
+                            "counterpart_account_id": str(tid),
+                            "transfer_group_id": gid,
+                        }
+                        row_in: dict[str, Any] = {
+                            "account_id": str(tid),
+                            "user_id": user["id"],
+                            "tx_type": "ingreso",
+                            "amount": float(m_rec),
+                            "tx_date": tx_date_tr.isoformat(),
+                            "description": f"{base_desc} ← {lbl_f}",
+                            "category": None,
+                            "business": None,
+                            "transfer_tag": "Traspaso interno",
+                            "transaction_notes": tx_notes_tr.strip() or None,
+                            "counterpart_account_id": str(fid),
+                            "transfer_group_id": gid,
+                        }
+                        ok1, w1 = kf_transaction_insert_flexible(sb, row_out)
+                        if not ok1:
+                            st.error("No se pudo registrar el egreso de origen.")
+                            st.code(w1 or "")
+                        else:
+                            ok2, w2 = kf_transaction_insert_flexible(sb, row_in)
+                            if not ok2:
+                                st.error(
+                                    "Se guardó el egreso pero falló el ingreso en destino. "
+                                    "Revisá movimientos en la cuenta origen y corregí a mano si hace falta."
+                                )
+                                st.code(w2 or "")
+                            else:
+                                if w1 or w2:
+                                    st.warning(
+                                        (w1 or "")
+                                        + ("\n" if w1 and w2 else "")
+                                        + (w2 or "")
+                                    )
+                                st.success("Traspaso registrado (egreso + ingreso).")
+                                st.rerun()
+
         with t2:
             st.write(
                 "Ajustá el saldo de corte si alineás con el Excel. Los movimientos cargados siguen aplicando."
@@ -1301,6 +1547,39 @@ def main() -> None:
 
         with t3:
             import_excel_section(sb, account_id, user["id"], user["display_name"])
+
+        _today_x = date.today()
+        with st.expander("Exportar Excel · cuenta activa del lateral", expanded=False):
+            st.caption(
+                "Movimientos de la **cuenta del lateral**, entre las fechas que elijas. "
+                "Montos en bruto para Excel."
+            )
+            ex_a, ex_b = st.columns(2)
+            with ex_a:
+                ex_from = st.date_input(
+                    "Desde",
+                    value=_today_x - timedelta(days=365),
+                    key="kf_xlsx_from",
+                )
+            with ex_b:
+                ex_to = st.date_input("Hasta", value=_today_x, key="kf_xlsx_to")
+            ex_df = _transactions_export_dataframe(txs, umap, opts, ex_from, ex_to)
+            st.caption(f"Filas en el archivo: **{len(ex_df)}**.")
+            if ex_df.empty:
+                st.info("No hay movimientos en ese rango para esta cuenta.")
+            else:
+                _xfn = (
+                    f"kenny_movimientos_{_safe_export_filename_part(str(acc.get('label')))}_"
+                    f"{ex_from}_{ex_to}.xlsx"
+                )
+                st.download_button(
+                    "Descargar .xlsx",
+                    data=_df_to_xlsx_bytes(ex_df),
+                    file_name=_xfn,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="kf_xlsx_dl",
+                    use_container_width=True,
+                )
 
         st.divider()
         st.subheader("Últimos movimientos")
