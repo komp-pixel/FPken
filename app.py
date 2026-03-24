@@ -399,15 +399,21 @@ def get_supabase() -> Client:
     if not u or not k:
         raise RuntimeError(
             "Faltan SUPABASE_URL y/o SUPABASE_KEY.\n\n"
-            "· Copiá `.streamlit/secrets.toml.example` a `.streamlit/secrets.toml` (misma carpeta) "
-            "y reemplazá la URL y la clave del panel Supabase → Project Settings → API.\n"
-            "· La sección debe llamarse exactamente [connections.supabase] con claves "
-            "SUPABASE_URL y SUPABASE_KEY.\n"
+            "· Copiá `.streamlit/secrets.toml.example` a `.streamlit/secrets.toml` (junto a `app.py`) "
+            "y pegá la URL y la clave de Supabase → Project Settings → API.\n"
+            "· Kenny Finanzas debe usar el proyecto Supabase **dedicado** a finanzas, no el del ERP Movi.\n"
+            "· Streamlit Cloud: Settings → Secrets con la misma sección [connections.supabase].\n"
             "· Opcional: variables de entorno SUPABASE_URL y SUPABASE_KEY."
         )
 
     if not u.startswith(("https://", "http://")):
         raise RuntimeError("SUPABASE_URL debe ser una URL (https://....supabase.co).")
+
+    if "tu-proyecto" in u.lower() or "pega_aqui" in k.lower() or "pega_aqui" in u.lower():
+        raise RuntimeError(
+            "Seguís con los textos de ejemplo en secrets (TU-PROYECTO / pega_aqui…). "
+            "Reemplazalos por la URL y la clave reales en Supabase → Project Settings → API."
+        )
 
     return create_client(u, k)
 

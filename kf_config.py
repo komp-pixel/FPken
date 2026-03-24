@@ -7,14 +7,21 @@ from typing import Tuple
 
 import streamlit as st
 
+try:
+    from streamlit.errors import StreamlitSecretNotFoundError
+except ImportError:
+    StreamlitSecretNotFoundError = type("StreamlitSecretNotFoundError", (Exception,), {})
+
 
 def resolve_supabase_credentials() -> Tuple[str, str]:
     u, k = "", ""
     try:
         sec = st.secrets["connections"]["supabase"]
-        u = str(sec.get("SUPABASE_URL", "")).strip().strip('"').strip("'")
-        k = str(sec.get("SUPABASE_KEY", "")).strip().strip('"').strip("'")
-    except (KeyError, TypeError):
+        u = str(sec["SUPABASE_URL"]).strip().strip('"').strip("'")
+        k = str(sec["SUPABASE_KEY"]).strip().strip('"').strip("'")
+    except (KeyError, TypeError, StreamlitSecretNotFoundError):
+        pass
+    except Exception:
         pass
 
     if not u or not k:
