@@ -115,17 +115,9 @@ def _field_tuples(acc: dict, kind: str) -> list[tuple[str, str]]:
     ]
 
 
-def _sort_key(acc: dict) -> tuple:
-    k = infer_account_kind(acc)
-    inst = (acc.get("institution_kind") or acc.get("bank_name") or "").lower()
-    if k == "app_pagos":
-        sub = 0 if "zelle" in inst else 1 if "zinli" in inst else 9
-    elif k == "banco":
-        sub = 0 if _is_pago_movil(acc) else 1
-    else:
-        sub = 0
-    kind_o = {"app_pagos": 0, "banco": 1, "wallet": 2}[k]
-    return (kind_o, sub, str(acc.get("label") or "").lower())
+def _label_sort_key(acc: dict) -> tuple[str, str]:
+    """Orden alfabético por nombre visible (label), desempate por id."""
+    return (str(acc.get("label") or "").strip().lower(), str(acc.get("id") or ""))
 
 
 _CARD_STYLE = """
@@ -236,7 +228,7 @@ def render_payment_method_cards(
     caption: str | None = None,
     edit_select_state_key: str = "kf_accounts_edit_select",
 ) -> None:
-    """Lista de cuentas como tarjetas horizontales (orden: apps → banco → wallet)."""
+    """Lista de cuentas como tarjetas; orden alfabético por nombre (label)."""
     if not accounts:
         st.info("Todavía no hay cuentas registradas.")
         return
@@ -245,9 +237,8 @@ def render_payment_method_cards(
     if caption:
         st.caption(caption)
     st.caption(
-        "Orden: **Zelle → Zinli → otras apps → Pago Móvil → otros bancos → wallets**. "
-        "Para **cédula / teléfono** en Pago Móvil usá **Nº cuenta** y **Routing** (teléfono) "
-        "en el alta bancaria, o editá en **Cuentas**."
+        "Orden **alfabético** por el nombre de la cuenta (campo *label*). "
+        "En **Pago Móvil**, cédula / teléfono: usá **Nº cuenta** y **Routing** en el alta bancaria."
     )
     st.caption(
         "**Editar:** debajo de cada tarjeta hay un botón (Streamlit no puede hacer clic "
@@ -256,7 +247,7 @@ def render_payment_method_cards(
 
     st.markdown(_CARD_STYLE, unsafe_allow_html=True)
 
-    ordered = sorted(accounts, key=_sort_key)
+    ordered = sorted(accounts, key=_label_sort_key)
     for acc in ordered:
         k = infer_account_kind(acc)
         _render_card(acc, k, interactive=True)
