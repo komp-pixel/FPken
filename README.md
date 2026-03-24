@@ -33,6 +33,12 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+En PowerShell, si falla `Activate.ps1`, usá `.\.venv\Scripts\python.exe -m pip install -r requirements.txt` y `.\.venv\Scripts\python.exe -m streamlit run app.py`.
+
+## 4. Ejecutar en la nube (Streamlit Cloud)
+
+Guía paso a paso: **[DEPLOY_STREAMLIT_CLOUD.md](DEPLOY_STREAMLIT_CLOUD.md)**. Resumen: conectás este repo en [share.streamlit.io](https://share.streamlit.io), **Main file** `app.py`, y en **Settings → Secrets** pegás el mismo TOML que en `.streamlit/secrets.toml` (`[connections.supabase]` con URL y **service_role**).
+
 ## Saldo
 
 El **saldo mostrado** = saldo inicial (fecha de referencia) + ingresos − egresos registrados en la app. Ajustá el saldo inicial en la pestaña correspondiente si alineás con Excel.
