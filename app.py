@@ -1583,6 +1583,10 @@ def main() -> None:
 
         st.divider()
         st.subheader("Últimos movimientos")
+        st.caption(
+            f"Solo se listan movimientos de la **cuenta activa** en el lateral: "
+            f"**{acc.get('label', '—')}**. Si registraste en otra (ej. Zinli), elegila en los atajos o en el desplegable."
+        )
         if not txs:
             st.write("Todavía no hay movimientos.")
         else:
@@ -1618,168 +1622,184 @@ def main() -> None:
             with st.expander("Editar movimiento", expanded=False):
                 st.caption(
                     "Corregí cuenta, tipo, fecha, monto, descripción, rubro/negocio, etiqueta, comisión o notas. "
-                    "Quién **registró** el movimiento no se modifica. La lista es la de la **cuenta activa** (lateral)."
+                    "En **Reportes** podés ver varias cuentas; acá elegí **la cuenta** donde quedó el movimiento (ej. Zinli)."
                 )
-                _pick_ix = st.selectbox(
-                    "Movimiento a editar",
-                    options=list(range(len(txs))),
-                    format_func=lambda i: _tx_edit_row_label(txs[i]),
-                    key="kf_tx_edit_pick",
-                )
-                sel_tx = txs[_pick_ix]
-                _tid = str(sel_tx.get("id") or "").strip()
-                if sel_tx.get("transfer_group_id") or sel_tx.get("counterpart_account_id"):
-                    st.warning(
-                        "Este registro está **vinculado a un traspaso** (u otra cuenta). "
-                        "Si cambiás el monto o la fecha, revisá también el movimiento en la otra cuenta."
-                    )
-                _acc_idx = (
-                    _opt_keys_ed.index(str(sel_tx.get("account_id")))
-                    if str(sel_tx.get("account_id") or "") in _opt_keys_ed
+                _def_ed_idx = (
+                    _opt_keys_ed.index(str(account_id))
+                    if str(account_id) in _opt_keys_ed
                     else 0
                 )
-                _tt_idx = 0 if str(sel_tx.get("tx_type")) == "ingreso" else 1
-                _biz_sel, _biz_other = _split_list_or_other(sel_tx.get("business"), INCOME_BUSINESSES)
-                _biz_ix = (
-                    INCOME_BUSINESSES.index(_biz_sel) if _biz_sel in INCOME_BUSINESSES else INCOME_BUSINESSES.index("Otro")
+                _edit_acc = st.selectbox(
+                    "Cuenta del movimiento a editar",
+                    _opt_keys_ed,
+                    index=_def_ed_idx,
+                    format_func=lambda x: opts[x],
+                    key="kf_tx_edit_account_filter",
                 )
-                _cat_sel, _cat_other = _split_list_or_other(sel_tx.get("category"), EXPENSE_CATEGORIES)
-                _cat_ix = (
-                    EXPENSE_CATEGORIES.index(_cat_sel)
-                    if _cat_sel in EXPENSE_CATEGORIES
-                    else EXPENSE_CATEGORIES.index("Otro")
-                )
-                _tag_opts_ed = ["(ninguna)"] + TRANSFER_TAGS
-                _tg_sel, _tg_other = _transfer_tag_edit_defaults(sel_tx.get("transfer_tag"))
-                _tg_ix = _tag_opts_ed.index(_tg_sel) if _tg_sel in _tag_opts_ed else 0
-                _fee_raw = sel_tx.get("fee_amount")
-                try:
-                    _fee_val = float(_fee_raw) if _fee_raw is not None and str(_fee_raw) != "" else 0.0
-                except (TypeError, ValueError):
-                    _fee_val = 0.0
-                if _fee_raw is not None and str(_fee_raw) != "":
+                txs_edit = load_transactions(sb, str(_edit_acc))
+                if not txs_edit:
+                    st.info("No hay movimientos en esa cuenta.")
+                else:
+                    _pick_ix = st.selectbox(
+                        "Elegí el movimiento",
+                        options=list(range(len(txs_edit))),
+                        format_func=lambda i: _tx_edit_row_label(txs_edit[i]),
+                        key=f"kf_tx_edit_pick_{_edit_acc}",
+                    )
+                    sel_tx = txs_edit[_pick_ix]
+                    _tid = str(sel_tx.get("id") or "").strip()
+                    if sel_tx.get("transfer_group_id") or sel_tx.get("counterpart_account_id"):
+                        st.warning(
+                            "Este registro está **vinculado a un traspaso** (u otra cuenta). "
+                            "Si cambiás el monto o la fecha, revisá también el movimiento en la otra cuenta."
+                        )
+                    _acc_idx = (
+                        _opt_keys_ed.index(str(sel_tx.get("account_id")))
+                        if str(sel_tx.get("account_id") or "") in _opt_keys_ed
+                        else 0
+                    )
+                    _tt_idx = 0 if str(sel_tx.get("tx_type")) == "ingreso" else 1
+                    _biz_sel, _biz_other = _split_list_or_other(sel_tx.get("business"), INCOME_BUSINESSES)
+                    _biz_ix = (
+                        INCOME_BUSINESSES.index(_biz_sel) if _biz_sel in INCOME_BUSINESSES else INCOME_BUSINESSES.index("Otro")
+                    )
+                    _cat_sel, _cat_other = _split_list_or_other(sel_tx.get("category"), EXPENSE_CATEGORIES)
+                    _cat_ix = (
+                        EXPENSE_CATEGORIES.index(_cat_sel)
+                        if _cat_sel in EXPENSE_CATEGORIES
+                        else EXPENSE_CATEGORIES.index("Otro")
+                    )
+                    _tag_opts_ed = ["(ninguna)"] + TRANSFER_TAGS
+                    _tg_sel, _tg_other = _transfer_tag_edit_defaults(sel_tx.get("transfer_tag"))
+                    _tg_ix = _tag_opts_ed.index(_tg_sel) if _tg_sel in _tag_opts_ed else 0
+                    _fee_raw = sel_tx.get("fee_amount")
                     try:
-                        if pd.isna(_fee_raw):
-                            _fee_val = 0.0
-                    except TypeError:
-                        pass
+                        _fee_val = float(_fee_raw) if _fee_raw is not None and str(_fee_raw) != "" else 0.0
+                    except (TypeError, ValueError):
+                        _fee_val = 0.0
+                    if _fee_raw is not None and str(_fee_raw) != "":
+                        try:
+                            if pd.isna(_fee_raw):
+                                _fee_val = 0.0
+                        except TypeError:
+                            pass
 
-                with st.form(f"kf_tx_edit_{_tid}"):
-                    cta_ed = st.selectbox(
-                        "Cuenta",
-                        _opt_keys_ed,
-                        index=_acc_idx,
-                        format_func=lambda i: opts[i],
-                    )
-                    acc_ed = next(a for a in accounts if str(a["id"]) == str(cta_ed))
-                    _acur_ed = str(acc_ed.get("currency", "USD"))
-                    _step_ed, _fmt_ed = _amount_input_format(_acur_ed)
-                    tx_type_ed = st.radio(
-                        "Tipo",
-                        ["ingreso", "egreso"],
-                        index=_tt_idx,
-                        horizontal=True,
-                    )
-                    tx_date_ed = st.date_input(
-                        "Fecha",
-                        value=_parse_tx_date_value(sel_tx.get("tx_date")),
-                    )
-                    amt_ed = st.number_input(
-                        f"Monto ({_acur_ed})",
-                        min_value=float(_step_ed),
-                        value=float(sel_tx.get("amount") or 0),
-                        step=float(_step_ed),
-                        format=_fmt_ed,
-                    )
-                    desc_ed = st.text_input(
-                        "Descripción / concepto",
-                        value=str(sel_tx.get("description") or ""),
-                    )
-                    st.caption("**Ingreso:** negocio. **Egreso:** rubro (solo aplica el que corresponda al tipo).")
-                    cb1, cb2 = st.columns(2)
-                    with cb1:
-                        biz_sel_ed = st.selectbox(
-                            "Negocio / fuente",
-                            INCOME_BUSINESSES,
-                            index=_biz_ix,
+                    with st.form(f"kf_tx_edit_{_tid}"):
+                        cta_ed = st.selectbox(
+                            "Cuenta",
+                            _opt_keys_ed,
+                            index=_acc_idx,
+                            format_func=lambda i: opts[i],
                         )
-                        biz_other_ed = st.text_input("Si negocio = Otro", value=_biz_other)
-                    with cb2:
-                        cat_sel_ed = st.selectbox(
-                            "Rubro del gasto",
-                            EXPENSE_CATEGORIES,
-                            index=_cat_ix,
+                        acc_ed = next(a for a in accounts if str(a["id"]) == str(cta_ed))
+                        _acur_ed = str(acc_ed.get("currency", "USD"))
+                        _step_ed, _fmt_ed = _amount_input_format(_acur_ed)
+                        tx_type_ed = st.radio(
+                            "Tipo",
+                            ["ingreso", "egreso"],
+                            index=_tt_idx,
+                            horizontal=True,
                         )
-                        cat_other_ed = st.text_input("Si rubro = Otro", value=_cat_other)
-                    st.caption(
-                        "**Etiqueta:** tramo / motivo opcional; **no** reemplaza la cuenta elegida arriba."
-                    )
-                    tag_sel_ed = st.selectbox(
-                        "Etiqueta de tramo / motivo (opcional)",
-                        _tag_opts_ed,
-                        index=_tg_ix,
-                    )
-                    tag_other_ed = st.text_input(
-                        "Texto si elegiste «Otro» en la etiqueta",
-                        value=_tg_other,
-                    )
-                    fee_amt_ed = st.number_input(
-                        "Comisión / fee (opcional)",
-                        min_value=0.0,
-                        value=float(_fee_val),
-                        step=float(_step_ed),
-                        format=_fmt_ed,
-                    )
-                    _fee_cur_opts_ed = list(dict.fromkeys([_acur_ed, "USD", "USDT", "VES"]))
-                    _fc_def = str(sel_tx.get("fee_currency") or _acur_ed)
-                    _fc_ix = (
-                        _fee_cur_opts_ed.index(_fc_def) if _fc_def in _fee_cur_opts_ed else 0
-                    )
-                    fee_cur_ed = st.selectbox("Moneda de la comisión", _fee_cur_opts_ed, index=_fc_ix)
-                    notes_ed = st.text_area(
-                        "Notas (opcional)",
-                        value=str(sel_tx.get("transaction_notes") or ""),
-                        height=60,
-                    )
-                    if st.form_submit_button("Guardar cambios"):
-                        if tx_type_ed == "ingreso":
-                            business_ed = _pick_list_value(biz_sel_ed, biz_other_ed)
-                            category_ed = None
-                        else:
-                            business_ed = None
-                            category_ed = _pick_list_value(cat_sel_ed, cat_other_ed)
-                        transfer_tag_ed = _resolve_transfer_tag(tag_sel_ed, tag_other_ed)
-                        upd: dict[str, Any] = {
-                            "account_id": str(cta_ed),
-                            "tx_type": tx_type_ed,
-                            "amount": float(amt_ed),
-                            "tx_date": tx_date_ed.isoformat(),
-                            "description": desc_ed.strip() or "(sin descripción)",
-                            "category": category_ed,
-                            "business": business_ed,
-                            "transfer_tag": transfer_tag_ed,
-                            "transaction_notes": notes_ed.strip() or None,
-                        }
-                        if fee_amt_ed and float(fee_amt_ed) > 0:
-                            upd["fee_amount"] = float(fee_amt_ed)
-                            upd["fee_currency"] = fee_cur_ed
-                        else:
-                            upd["fee_amount"] = None
-                            upd["fee_currency"] = None
-                        if sel_tx.get("counterpart_account_id"):
-                            upd["counterpart_account_id"] = str(sel_tx.get("counterpart_account_id"))
-                        if sel_tx.get("transfer_group_id"):
-                            upd["transfer_group_id"] = str(sel_tx.get("transfer_group_id"))
-                        ok_ed, wmsg_ed = kf_transaction_update_flexible(sb, _tid, upd)
-                        if ok_ed:
-                            if wmsg_ed:
-                                st.warning(wmsg_ed)
+                        tx_date_ed = st.date_input(
+                            "Fecha",
+                            value=_parse_tx_date_value(sel_tx.get("tx_date")),
+                        )
+                        amt_ed = st.number_input(
+                            f"Monto ({_acur_ed})",
+                            min_value=float(_step_ed),
+                            value=float(sel_tx.get("amount") or 0),
+                            step=float(_step_ed),
+                            format=_fmt_ed,
+                        )
+                        desc_ed = st.text_input(
+                            "Descripción / concepto",
+                            value=str(sel_tx.get("description") or ""),
+                        )
+                        st.caption("**Ingreso:** negocio. **Egreso:** rubro (solo aplica el que corresponda al tipo).")
+                        cb1, cb2 = st.columns(2)
+                        with cb1:
+                            biz_sel_ed = st.selectbox(
+                                "Negocio / fuente",
+                                INCOME_BUSINESSES,
+                                index=_biz_ix,
+                            )
+                            biz_other_ed = st.text_input("Si negocio = Otro", value=_biz_other)
+                        with cb2:
+                            cat_sel_ed = st.selectbox(
+                                "Rubro del gasto",
+                                EXPENSE_CATEGORIES,
+                                index=_cat_ix,
+                            )
+                            cat_other_ed = st.text_input("Si rubro = Otro", value=_cat_other)
+                        st.caption(
+                            "**Etiqueta:** tramo / motivo opcional; **no** reemplaza la cuenta elegida arriba."
+                        )
+                        tag_sel_ed = st.selectbox(
+                            "Etiqueta de tramo / motivo (opcional)",
+                            _tag_opts_ed,
+                            index=_tg_ix,
+                        )
+                        tag_other_ed = st.text_input(
+                            "Texto si elegiste «Otro» en la etiqueta",
+                            value=_tg_other,
+                        )
+                        fee_amt_ed = st.number_input(
+                            "Comisión / fee (opcional)",
+                            min_value=0.0,
+                            value=float(_fee_val),
+                            step=float(_step_ed),
+                            format=_fmt_ed,
+                        )
+                        _fee_cur_opts_ed = list(dict.fromkeys([_acur_ed, "USD", "USDT", "VES"]))
+                        _fc_def = str(sel_tx.get("fee_currency") or _acur_ed)
+                        _fc_ix = (
+                            _fee_cur_opts_ed.index(_fc_def) if _fc_def in _fee_cur_opts_ed else 0
+                        )
+                        fee_cur_ed = st.selectbox("Moneda de la comisión", _fee_cur_opts_ed, index=_fc_ix)
+                        notes_ed = st.text_area(
+                            "Notas (opcional)",
+                            value=str(sel_tx.get("transaction_notes") or ""),
+                            height=60,
+                        )
+                        if st.form_submit_button("Guardar cambios"):
+                            if tx_type_ed == "ingreso":
+                                business_ed = _pick_list_value(biz_sel_ed, biz_other_ed)
+                                category_ed = None
                             else:
-                                st.success("Movimiento actualizado.")
-                            st.rerun()
-                        else:
-                            st.error("No se pudo guardar.")
-                            st.code(wmsg_ed or "")
+                                business_ed = None
+                                category_ed = _pick_list_value(cat_sel_ed, cat_other_ed)
+                            transfer_tag_ed = _resolve_transfer_tag(tag_sel_ed, tag_other_ed)
+                            upd: dict[str, Any] = {
+                                "account_id": str(cta_ed),
+                                "tx_type": tx_type_ed,
+                                "amount": float(amt_ed),
+                                "tx_date": tx_date_ed.isoformat(),
+                                "description": desc_ed.strip() or "(sin descripción)",
+                                "category": category_ed,
+                                "business": business_ed,
+                                "transfer_tag": transfer_tag_ed,
+                                "transaction_notes": notes_ed.strip() or None,
+                            }
+                            if fee_amt_ed and float(fee_amt_ed) > 0:
+                                upd["fee_amount"] = float(fee_amt_ed)
+                                upd["fee_currency"] = fee_cur_ed
+                            else:
+                                upd["fee_amount"] = None
+                                upd["fee_currency"] = None
+                            if sel_tx.get("counterpart_account_id"):
+                                upd["counterpart_account_id"] = str(sel_tx.get("counterpart_account_id"))
+                            if sel_tx.get("transfer_group_id"):
+                                upd["transfer_group_id"] = str(sel_tx.get("transfer_group_id"))
+                            ok_ed, wmsg_ed = kf_transaction_update_flexible(sb, _tid, upd)
+                            if ok_ed:
+                                if wmsg_ed:
+                                    st.warning(wmsg_ed)
+                                else:
+                                    st.success("Movimiento actualizado.")
+                                st.rerun()
+                            else:
+                                st.error("No se pudo guardar.")
+                                st.code(wmsg_ed or "")
 
             del_id = st.text_input("Eliminar por ID (uuid)", placeholder="…")
             if st.button("Eliminar") and del_id.strip():
