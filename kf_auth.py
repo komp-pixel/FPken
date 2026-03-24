@@ -14,6 +14,8 @@ import bcrypt
 import streamlit as st
 from supabase import Client
 
+from kf_config import resolve_supabase_credentials
+
 KF_SESSION_COOKIE = "kf_fin_session"
 SESSION_MAX_DAYS = 60
 
@@ -27,7 +29,9 @@ def _session_signing_key() -> bytes:
                 return str(sk).encode("utf-8")
     except Exception:
         pass
-    k = st.secrets["connections"]["supabase"]["SUPABASE_KEY"]
+    _, k = resolve_supabase_credentials()
+    if not k:
+        raise RuntimeError("SUPABASE_KEY no configurada (secrets o entorno).")
     return hashlib.sha256((str(k) + "|kf_fin_session_v1").encode("utf-8")).digest()
 
 

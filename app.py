@@ -16,6 +16,7 @@ from supabase import Client
 
 from kf_account_cards import render_payment_method_cards
 from kf_auth import gate_auth, logout
+from kf_config import resolve_supabase_credentials
 from kf_constants import (
     ACCOUNT_KIND_LABELS,
     CURRENCIES,
@@ -393,9 +394,22 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
 def get_supabase() -> Client:
     from supabase import create_client
 
-    u = st.secrets["connections"]["supabase"]["SUPABASE_URL"]
-    k = st.secrets["connections"]["supabase"]["SUPABASE_KEY"]
-    return create_client(str(u), str(k))
+    u, k = resolve_supabase_credentials()
+
+    if not u or not k:
+        raise RuntimeError(
+            "Faltan SUPABASE_URL y/o SUPABASE_KEY.\n\n"
+            "· Copiá `.streamlit/secrets.toml.example` a `.streamlit/secrets.toml` (misma carpeta) "
+            "y reemplazá la URL y la clave del panel Supabase → Project Settings → API.\n"
+            "· La sección debe llamarse exactamente [connections.supabase] con claves "
+            "SUPABASE_URL y SUPABASE_KEY.\n"
+            "· Opcional: variables de entorno SUPABASE_URL y SUPABASE_KEY."
+        )
+
+    if not u.startswith(("https://", "http://")):
+        raise RuntimeError("SUPABASE_URL debe ser una URL (https://....supabase.co).")
+
+    return create_client(u, k)
 
 
 def _dec(x: Any) -> Decimal:
@@ -755,8 +769,12 @@ def main() -> None:
     try:
         sb = get_supabase()
     except Exception as e:
-        st.error("No se pudo conectar a Supabase. Revisá los secrets.")
-        st.code(str(e))
+        st.error("No se pudo iniciar el cliente de Supabase. Revisá URL, clave y archivo de secrets.")
+        st.markdown(str(e))
+        st.caption(
+            "Archivo esperado: **FPken/.streamlit/secrets.toml** (no subir a Git). "
+            "Ejecutá Streamlit con la carpeta **FPken** como directorio de trabajo."
+        )
         st.stop()
 
     user = gate_auth(sb)
