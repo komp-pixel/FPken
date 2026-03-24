@@ -391,6 +391,28 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
                 st.code(wmsg or "")
 
 
+def _require_jwt_supabase_key(key: str) -> None:
+    """supabase-py 2.8 solo acepta JWT (eyJ...); las claves nuevas sb_secret_ fallan al crear el cliente."""
+    import re
+
+    if re.match(
+        r"^[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*$",
+        key,
+    ):
+        return
+    if key.startswith("sb_secret_") or key.startswith("sb_publishable_"):
+        raise RuntimeError(
+            "La clave que pegaste es la **nueva** de Supabase (`sb_secret_...` / `sb_publishable_...`). "
+            "Esta versión de la app usa `supabase-py` 2.8, que solo acepta la clave **JWT** (texto largo que empieza con **eyJ**).\n\n"
+            "En Supabase: **Project Settings → API** → buscá **Legacy API keys** (anon / **service_role**) "
+            "y copiá **service_role** en `SUPABASE_KEY`. No la clave `sb_secret_`."
+        )
+    raise RuntimeError(
+        "SUPABASE_KEY no tiene formato JWT (debería empezar con `eyJ`). "
+        "Revisá que copiaste la clave **service_role** completa del apartado legacy en Project Settings → API."
+    )
+
+
 def get_supabase() -> Client:
     from supabase import create_client
 
@@ -400,7 +422,7 @@ def get_supabase() -> Client:
         raise RuntimeError(
             "Faltan SUPABASE_URL y/o SUPABASE_KEY.\n\n"
             "· Copiá `.streamlit/secrets.toml.example` a `.streamlit/secrets.toml` (junto a `app.py`) "
-            "y pegá la URL y la clave de Supabase → Project Settings → API.\n"
+            "y pegá la URL y la clave **service_role JWT** (eyJ…) de Supabase → Project Settings → API → **Legacy API keys**.\n"
             "· Kenny Finanzas debe usar el proyecto Supabase **dedicado** a finanzas, no el del ERP Movi.\n"
             "· Streamlit Cloud: Settings → Secrets con la misma sección [connections.supabase].\n"
             "· Opcional: variables de entorno SUPABASE_URL y SUPABASE_KEY."
@@ -415,6 +437,7 @@ def get_supabase() -> Client:
             "Reemplazalos por la URL y la clave reales en Supabase → Project Settings → API."
         )
 
+    _require_jwt_supabase_key(k)
     return create_client(u, k)
 
 
@@ -778,8 +801,8 @@ def main() -> None:
         st.error("No se pudo iniciar el cliente de Supabase. Revisá URL, clave y archivo de secrets.")
         st.markdown(str(e))
         st.caption(
-            "Archivo esperado: **FPken/.streamlit/secrets.toml** (no subir a Git). "
-            "Ejecutá Streamlit con la carpeta **FPken** como directorio de trabajo."
+            "Secrets: **`.streamlit/secrets.toml`** en la misma carpeta que `app.py` (no subir a Git). "
+            "Usá la clave **service_role** en formato JWT (**eyJ...**), sección Legacy en Supabase → API; no `sb_secret_`."
         )
         st.stop()
 

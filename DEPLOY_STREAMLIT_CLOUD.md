@@ -19,6 +19,8 @@ Publicación gratuita en [share.streamlit.io](https://share.streamlit.io) con cu
 
 En la app → **⚙ Settings** → **Secrets**, pegá un TOML con **exactamente** esta forma:
 
+`SUPABASE_KEY` debe ser el JWT **service_role** (empieza con `eyJ`), de **Legacy API keys** en el panel de Supabase. No uses la clave nueva `sb_secret_...` con esta versión de la app.
+
 ```toml
 [connections.supabase]
 SUPABASE_URL = "https://TU-PROYECTO.supabase.co"
@@ -29,7 +31,7 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."
 # SESSION_SIGNING_KEY = "cadena-larga-aleatoria-solo-tuya"
 ```
 
-- **URL y clave:** Supabase → **Project Settings** → **API** (Project URL + **service_role** secret).
+- **URL y clave:** Supabase → **Project Settings** → **API** (Project URL + **service_role** en **Legacy API keys**, JWT `eyJ...`).
 - Guardá y usá **Reboot** o **Redeploy** si la app ya existía.
 
 ## Python en Cloud
