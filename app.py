@@ -1168,10 +1168,26 @@ def main() -> None:
         t1, t2, t3 = st.tabs(["Registrar", "Saldo inicial", "Importar Excel"])
 
         with t1:
-            acur = str(acc.get("currency", "USD"))
-            step_f, fmt_f = _amount_input_format(acur)
-            st.caption(f"Movimientos en **{acur}** para la cuenta activa (cambiala en la barra lateral).")
+            st.caption(
+                "Elegí **qué cuenta** toca el saldo (lista de tus cuentas registradas). "
+                "La barra lateral solo cambia qué movimientos ves abajo; podés registrar en otra cuenta desde acá."
+            )
+            _opt_keys_tx = list(opts.keys())
+            _idx_sidebar = (
+                _opt_keys_tx.index(str(account_id)) if str(account_id) in _opt_keys_tx else 0
+            )
             with st.form("tx"):
+                cta_tx = st.selectbox(
+                    "Cuenta del movimiento (ingreso entra acá · egreso sale de acá)",
+                    _opt_keys_tx,
+                    index=_idx_sidebar,
+                    format_func=lambda i: opts[i],
+                    help="Son tus cuentas dadas de alta en **Cuentas**. Esto define en qué saldo impacta el movimiento.",
+                )
+                acc_row = next(a for a in accounts if str(a["id"]) == str(cta_tx))
+                acur = str(acc_row.get("currency", "USD"))
+                step_f, fmt_f = _amount_input_format(acur)
+                st.caption(f"Moneda del monto según esta cuenta: **{acur}**.")
                 col_a, col_b = st.columns(2)
                 with col_a:
                     tx_type = st.radio("Tipo", ["ingreso", "egreso"], horizontal=True)
@@ -1205,9 +1221,14 @@ def main() -> None:
                         help="Casa, carro, hijos…",
                     )
                     cat_other = st.text_input("Si rubro = Otro, escribí el nombre")
-                tag_opts = ["(ninguna)"] + TRANSFER_TAGS
-                tag_sel = st.selectbox("Etiqueta (ej. Zelle→Binance, futuros)", tag_opts)
-                tag_other = st.text_input("Texto si usás etiqueta «Otro»")
+                with st.expander("Clasificación extra (opcional — no es la cuenta)", expanded=False):
+                    st.caption(
+                        "Las opciones tipo «Zelle → Binance» son **etiquetas de uso** (cómo se movió el dinero), "
+                        "no reemplazan la cuenta de arriba. Dejalo en *(ninguna)* si no lo necesitás."
+                    )
+                    tag_opts = ["(ninguna)"] + TRANSFER_TAGS
+                    tag_sel = st.selectbox("Etiqueta de tramo / motivo", tag_opts)
+                    tag_other = st.text_input("Texto si elegiste «Otro»")
                 fee_amt = st.number_input(
                     "Comisión / fee del movimiento (opcional)",
                     min_value=0.0,
@@ -1225,14 +1246,9 @@ def main() -> None:
                     else:
                         business = None
                         category = _pick_list_value(cat_sel, cat_other)
-                    if tag_sel == "(ninguna)":
-                        transfer_tag = None
-                    elif tag_sel == "Otro":
-                        transfer_tag = tag_other.strip() or None
-                    else:
-                        transfer_tag = tag_sel
+                    transfer_tag = _resolve_transfer_tag(tag_sel, tag_other)
                     row_ins: dict[str, Any] = {
-                        "account_id": account_id,
+                        "account_id": str(cta_tx),
                         "user_id": user["id"],
                         "tx_type": tx_type,
                         "amount": float(amount),
@@ -1416,8 +1432,18 @@ def main() -> None:
                             index=_cat_ix,
                         )
                         cat_other_ed = st.text_input("Si rubro = Otro", value=_cat_other)
-                    tag_sel_ed = st.selectbox("Etiqueta (opcional)", _tag_opts_ed, index=_tg_ix)
-                    tag_other_ed = st.text_input("Etiqueta libre si elegiste Otro", value=_tg_other)
+                    st.caption(
+                        "**Etiqueta:** tramo / motivo opcional; **no** reemplaza la cuenta elegida arriba."
+                    )
+                    tag_sel_ed = st.selectbox(
+                        "Etiqueta de tramo / motivo (opcional)",
+                        _tag_opts_ed,
+                        index=_tg_ix,
+                    )
+                    tag_other_ed = st.text_input(
+                        "Texto si elegiste «Otro» en la etiqueta",
+                        value=_tg_other,
+                    )
                     fee_amt_ed = st.number_input(
                         "Comisión / fee (opcional)",
                         min_value=0.0,
