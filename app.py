@@ -41,6 +41,48 @@ def _pick_list_value(selected: str, other_text: str) -> str | None:
     return selected
 
 
+def _resolve_transfer_tag(tag_sel: str, tag_other: str) -> str | None:
+    if tag_sel == "(ninguna)":
+        return None
+    if tag_sel == "Otro":
+        return tag_other.strip() or None
+    return tag_sel
+
+
+def _split_list_or_other(raw: Any, choices: list[str]) -> tuple[str, str]:
+    s = str(raw or "").strip()
+    if not s:
+        return choices[0], ""
+    if s in choices:
+        return s, ""
+    return "Otro", s
+
+
+def _transfer_tag_edit_defaults(raw: Any) -> tuple[str, str]:
+    t = str(raw or "").strip()
+    if not t:
+        return "(ninguna)", ""
+    if t in TRANSFER_TAGS:
+        return t, ""
+    return "Otro", t
+
+
+def _tx_edit_row_label(t: dict[str, Any]) -> str:
+    td = str(t.get("tx_date") or "")[:10]
+    tt = str(t.get("tx_type") or "?")
+    am = t.get("amount")
+    de = (str(t.get("description") or "").replace("\n", " "))[:34]
+    tid = str(t.get("id") or "")
+    suf = f"{tid[:8]}…" if len(tid) >= 8 else tid
+    return f"{td} · {tt} · {am} · {de} · id {suf}"
+
+
+def _parse_tx_date_value(v: Any) -> date:
+    if v is None:
+        return date.today()
+    return date.fromisoformat(str(v)[:10])
+
+
 _KF_ACCOUNT_CORE_FIELDS = frozenset(
     {
         "label",
@@ -123,6 +165,46 @@ def kf_transaction_insert_flexible(sb: Client, row: dict[str, Any]) -> tuple[boo
         )
 
 
+def kf_transaction_update_flexible(sb: Client, tx_id: str, row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Actualiza kf_transaction; sin columnas de traspaso o metadatos reintenta con menos campos."""
+    try:
+        sb.table("kf_transaction").update(row).eq("id", tx_id).execute()
+        return True, None
+    except Exception as e:
+        first = str(e)
+    row2 = {k: v for k, v in row.items() if k not in ("counterpart_account_id", "transfer_group_id")}
+    if row2 != row:
+        try:
+            sb.table("kf_transaction").update(row2).eq("id", tx_id).execute()
+            return True, (
+                "Movimiento actualizado; no se pudieron guardar columnas de enlace de traspaso. "
+                "Si usás traspasos, ejecutá **`patch_007_transaction_counterpart.sql`**."
+            )
+        except Exception as e2:
+            first = f"{first}\n---\n{str(e2)}"
+    core_keys = (
+        "account_id",
+        "tx_type",
+        "amount",
+        "tx_date",
+        "description",
+        "category",
+        "business",
+        "transaction_notes",
+        "transfer_tag",
+        "fee_amount",
+        "fee_currency",
+    )
+    core = {k: row2[k] for k in core_keys if k in row2}
+    try:
+        sb.table("kf_transaction").update(core).eq("id", tx_id).execute()
+        return True, (
+            "Se guardaron los datos principales; si categoría, comisión o notas no aplicaron, revisá la base."
+        )
+    except Exception as e3:
+        return False, f"{first}\n---\n{str(e3)}"
+
+
 def _bootstrap_account_result(ok: bool, wmsg: str | None) -> None:
     if ok:
         if wmsg:
@@ -187,123 +269,6 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
         heading="Vista tarjeta (como métodos P2P)",
     )
     st.divider()
-
-    st.subheader("Editar registro")
-    opts = {
-        str(a["id"]): f'[{ACCOUNT_KIND_LABELS.get(_infer_account_kind(a), "?")}] {a.get("label")} ({a.get("currency")})'
-        for a in accounts
-    }
-    _KF_EDIT_SEL = "kf_accounts_edit_select"
-    opts_keys = list(opts.keys())
-    if _KF_EDIT_SEL not in st.session_state or st.session_state[_KF_EDIT_SEL] not in opts_keys:
-        st.session_state[_KF_EDIT_SEL] = opts_keys[0]
-    st.caption("Podés usar el desplegable o el botón **✏️ Editar** bajo cada tarjeta.")
-    pick = st.selectbox(
-        "Cuenta a editar",
-        options=opts_keys,
-        format_func=lambda i: opts[i],
-        key=_KF_EDIT_SEL,
-    )
-    acc = next(x for x in accounts if str(x["id"]) == pick)
-    kind0 = _infer_account_kind(acc)
-    kind_labels = list(ACCOUNT_KIND_LABELS.keys())
-    with st.form("edit_acc"):
-        nk = st.selectbox(
-            "Tipo de registro",
-            kind_labels,
-            index=kind_labels.index(kind0) if kind0 in kind_labels else 0,
-            format_func=lambda k: ACCOUNT_KIND_LABELS[k],
-        )
-        elabel = st.text_input("Nombre visible", value=str(acc.get("label") or ""))
-        ecur = st.selectbox(
-            "Moneda",
-            CURRENCIES,
-            index=CURRENCIES.index(acc["currency"]) if acc.get("currency") in CURRENCIES else 0,
-        )
-        eholder = st.text_input("Titular", value=str(acc.get("holder_name") or ""))
-        enotes = st.text_area("Notas", value=str(acc.get("notes") or ""), height=70)
-
-        if nk == "banco":
-            ebank = st.text_input("Nombre del banco", value=str(acc.get("bank_name") or ""))
-            ik0 = acc.get("institution_kind") or "Otro"
-            ei = st.selectbox(
-                "Institución",
-                INSTITUTION_BANKS,
-                index=INSTITUTION_BANKS.index(ik0) if ik0 in INSTITUTION_BANKS else 0,
-            )
-            ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in INSTITUTION_BANKS else ik0)
-            enum = st.text_input("Nº cuenta / ref", value=str(acc.get("account_number") or ""))
-            erout = st.text_input("Routing / Swift", value=str(acc.get("routing_or_swift") or ""))
-        elif nk == "wallet":
-            ebank = st.text_input("Exchange / red", value=str(acc.get("bank_name") or ""))
-            ik0 = acc.get("institution_kind") or "Otro"
-            ei = st.selectbox(
-                "Tipo",
-                INSTITUTION_WALLET,
-                index=INSTITUTION_WALLET.index(ik0) if ik0 in INSTITUTION_WALLET else 0,
-            )
-            ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in INSTITUTION_WALLET else ik0)
-            ewallet = st.text_input("Wallet / UID", value=str(acc.get("wallet_address") or ""))
-        else:
-            ebank = st.text_input("App (nombre)", value=str(acc.get("bank_name") or ""))
-            ik0 = acc.get("institution_kind") or "Otro"
-            ei = st.selectbox(
-                "App",
-                INSTITUTION_APPS,
-                index=INSTITUTION_APPS.index(ik0) if ik0 in INSTITUTION_APPS else 0,
-            )
-            ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in INSTITUTION_APPS else ik0)
-            ezelle = st.text_input(
-                "Usuario / email / tel.",
-                value=str(acc.get("zelle_email_or_phone") or ""),
-            )
-
-        if st.form_submit_button("Guardar"):
-            inst_e = _pick_list_value(ei, ei_other) or ei
-            base: dict[str, Any] = {
-                "account_kind": nk,
-                "label": elabel.strip() or "Cuenta",
-                "currency": ecur,
-                "holder_name": eholder.strip() or None,
-                "notes": enotes.strip() or None,
-                "institution_kind": inst_e,
-                **_nulls_for_kind(nk),
-            }
-            if nk == "banco":
-                base.update(
-                    {
-                        "bank_name": ebank.strip() or inst_e,
-                        "account_number": enum.strip() or None,
-                        "routing_or_swift": erout.strip() or None,
-                    }
-                )
-            elif nk == "wallet":
-                base.update(
-                    {
-                        "bank_name": ebank.strip() or inst_e,
-                        "wallet_address": ewallet.strip() or None,
-                    }
-                )
-            else:
-                base.update(
-                    {
-                        "bank_name": ebank.strip() or inst_e,
-                        "zelle_email_or_phone": ezelle.strip() or None,
-                    }
-                )
-            ok, wmsg = kf_account_update_flexible(sb, pick, base)
-            if ok:
-                if wmsg:
-                    st.warning(wmsg)
-                else:
-                    st.success("Actualizado.")
-                st.rerun()
-            else:
-                st.error("No se pudo guardar.")
-                st.code(wmsg or "")
-
-    st.divider()
-
 
     by_k: dict[str, list[dict[str, Any]]] = {"banco": [], "wallet": [], "app_pagos": []}
     for a in accounts:
@@ -435,6 +400,109 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
                             st.code(wmsg or "")
         st.divider()
 
+    st.subheader("Editar registro")
+    opts = {
+        str(a["id"]): f'[{ACCOUNT_KIND_LABELS.get(_infer_account_kind(a), "?")}] {a.get("label")} ({a.get("currency")})'
+        for a in accounts
+    }
+    pick = st.selectbox("Elegir", options=list(opts.keys()), format_func=lambda i: opts[i])
+    acc = next(x for x in accounts if str(x["id"]) == pick)
+    kind0 = _infer_account_kind(acc)
+    kind_labels = list(ACCOUNT_KIND_LABELS.keys())
+    with st.form("edit_acc"):
+        nk = st.selectbox(
+            "Tipo de registro",
+            kind_labels,
+            index=kind_labels.index(kind0) if kind0 in kind_labels else 0,
+            format_func=lambda k: ACCOUNT_KIND_LABELS[k],
+        )
+        elabel = st.text_input("Nombre visible", value=str(acc.get("label") or ""))
+        ecur = st.selectbox(
+            "Moneda",
+            CURRENCIES,
+            index=CURRENCIES.index(acc["currency"]) if acc.get("currency") in CURRENCIES else 0,
+        )
+        eholder = st.text_input("Titular", value=str(acc.get("holder_name") or ""))
+        enotes = st.text_area("Notas", value=str(acc.get("notes") or ""), height=70)
+
+        if nk == "banco":
+            ebank = st.text_input("Nombre del banco", value=str(acc.get("bank_name") or ""))
+            ik0 = acc.get("institution_kind") or "Otro"
+            ei = st.selectbox(
+                "Institución",
+                INSTITUTION_BANKS,
+                index=INSTITUTION_BANKS.index(ik0) if ik0 in INSTITUTION_BANKS else 0,
+            )
+            ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in INSTITUTION_BANKS else ik0)
+            enum = st.text_input("Nº cuenta / ref", value=str(acc.get("account_number") or ""))
+            erout = st.text_input("Routing / Swift", value=str(acc.get("routing_or_swift") or ""))
+        elif nk == "wallet":
+            ebank = st.text_input("Exchange / red", value=str(acc.get("bank_name") or ""))
+            ik0 = acc.get("institution_kind") or "Otro"
+            ei = st.selectbox(
+                "Tipo",
+                INSTITUTION_WALLET,
+                index=INSTITUTION_WALLET.index(ik0) if ik0 in INSTITUTION_WALLET else 0,
+            )
+            ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in INSTITUTION_WALLET else ik0)
+            ewallet = st.text_input("Wallet / UID", value=str(acc.get("wallet_address") or ""))
+        else:
+            ebank = st.text_input("App (nombre)", value=str(acc.get("bank_name") or ""))
+            ik0 = acc.get("institution_kind") or "Otro"
+            ei = st.selectbox(
+                "App",
+                INSTITUTION_APPS,
+                index=INSTITUTION_APPS.index(ik0) if ik0 in INSTITUTION_APPS else 0,
+            )
+            ei_other = st.text_input("Si Otro, especificá", value="" if ik0 in INSTITUTION_APPS else ik0)
+            ezelle = st.text_input(
+                "Usuario / email / tel.",
+                value=str(acc.get("zelle_email_or_phone") or ""),
+            )
+
+        if st.form_submit_button("Guardar"):
+            inst_e = _pick_list_value(ei, ei_other) or ei
+            base: dict[str, Any] = {
+                "account_kind": nk,
+                "label": elabel.strip() or "Cuenta",
+                "currency": ecur,
+                "holder_name": eholder.strip() or None,
+                "notes": enotes.strip() or None,
+                "institution_kind": inst_e,
+                **_nulls_for_kind(nk),
+            }
+            if nk == "banco":
+                base.update(
+                    {
+                        "bank_name": ebank.strip() or inst_e,
+                        "account_number": enum.strip() or None,
+                        "routing_or_swift": erout.strip() or None,
+                    }
+                )
+            elif nk == "wallet":
+                base.update(
+                    {
+                        "bank_name": ebank.strip() or inst_e,
+                        "wallet_address": ewallet.strip() or None,
+                    }
+                )
+            else:
+                base.update(
+                    {
+                        "bank_name": ebank.strip() or inst_e,
+                        "zelle_email_or_phone": ezelle.strip() or None,
+                    }
+                )
+            ok, wmsg = kf_account_update_flexible(sb, pick, base)
+            if ok:
+                if wmsg:
+                    st.warning(wmsg)
+                else:
+                    st.success("Actualizado.")
+                st.rerun()
+            else:
+                st.error("No se pudo guardar.")
+                st.code(wmsg or "")
 
 
 def _require_jwt_supabase_key(key: str) -> None:
@@ -1250,6 +1318,164 @@ def main() -> None:
                 lambda x: f"{float(x):,.6f}" if pd.notna(x) and x is not None and float(x) > 0 else "—"
             )
             st.dataframe(show, use_container_width=True, hide_index=True)
+
+            _opt_keys_ed = list(opts.keys())
+            with st.expander("Editar movimiento", expanded=False):
+                st.caption(
+                    "Corregí cuenta, tipo, fecha, monto, descripción, rubro/negocio, etiqueta, comisión o notas. "
+                    "Quién **registró** el movimiento no se modifica. La lista es la de la **cuenta activa** (lateral)."
+                )
+                _pick_ix = st.selectbox(
+                    "Movimiento a editar",
+                    options=list(range(len(txs))),
+                    format_func=lambda i: _tx_edit_row_label(txs[i]),
+                    key="kf_tx_edit_pick",
+                )
+                sel_tx = txs[_pick_ix]
+                _tid = str(sel_tx.get("id") or "").strip()
+                if sel_tx.get("transfer_group_id") or sel_tx.get("counterpart_account_id"):
+                    st.warning(
+                        "Este registro está **vinculado a un traspaso** (u otra cuenta). "
+                        "Si cambiás el monto o la fecha, revisá también el movimiento en la otra cuenta."
+                    )
+                _acc_idx = (
+                    _opt_keys_ed.index(str(sel_tx.get("account_id")))
+                    if str(sel_tx.get("account_id") or "") in _opt_keys_ed
+                    else 0
+                )
+                _tt_idx = 0 if str(sel_tx.get("tx_type")) == "ingreso" else 1
+                _biz_sel, _biz_other = _split_list_or_other(sel_tx.get("business"), INCOME_BUSINESSES)
+                _biz_ix = (
+                    INCOME_BUSINESSES.index(_biz_sel) if _biz_sel in INCOME_BUSINESSES else INCOME_BUSINESSES.index("Otro")
+                )
+                _cat_sel, _cat_other = _split_list_or_other(sel_tx.get("category"), EXPENSE_CATEGORIES)
+                _cat_ix = (
+                    EXPENSE_CATEGORIES.index(_cat_sel)
+                    if _cat_sel in EXPENSE_CATEGORIES
+                    else EXPENSE_CATEGORIES.index("Otro")
+                )
+                _tag_opts_ed = ["(ninguna)"] + TRANSFER_TAGS
+                _tg_sel, _tg_other = _transfer_tag_edit_defaults(sel_tx.get("transfer_tag"))
+                _tg_ix = _tag_opts_ed.index(_tg_sel) if _tg_sel in _tag_opts_ed else 0
+                _fee_raw = sel_tx.get("fee_amount")
+                try:
+                    _fee_val = float(_fee_raw) if _fee_raw is not None and str(_fee_raw) != "" else 0.0
+                except (TypeError, ValueError):
+                    _fee_val = 0.0
+                if _fee_raw is not None and str(_fee_raw) != "":
+                    try:
+                        if pd.isna(_fee_raw):
+                            _fee_val = 0.0
+                    except TypeError:
+                        pass
+
+                with st.form(f"kf_tx_edit_{_tid}"):
+                    cta_ed = st.selectbox(
+                        "Cuenta",
+                        _opt_keys_ed,
+                        index=_acc_idx,
+                        format_func=lambda i: opts[i],
+                    )
+                    acc_ed = next(a for a in accounts if str(a["id"]) == str(cta_ed))
+                    _acur_ed = str(acc_ed.get("currency", "USD"))
+                    _step_ed, _fmt_ed = _amount_input_format(_acur_ed)
+                    tx_type_ed = st.radio(
+                        "Tipo",
+                        ["ingreso", "egreso"],
+                        index=_tt_idx,
+                        horizontal=True,
+                    )
+                    tx_date_ed = st.date_input(
+                        "Fecha",
+                        value=_parse_tx_date_value(sel_tx.get("tx_date")),
+                    )
+                    amt_ed = st.number_input(
+                        f"Monto ({_acur_ed})",
+                        min_value=float(_step_ed),
+                        value=float(sel_tx.get("amount") or 0),
+                        step=float(_step_ed),
+                        format=_fmt_ed,
+                    )
+                    desc_ed = st.text_input(
+                        "Descripción / concepto",
+                        value=str(sel_tx.get("description") or ""),
+                    )
+                    st.caption("**Ingreso:** negocio. **Egreso:** rubro (solo aplica el que corresponda al tipo).")
+                    cb1, cb2 = st.columns(2)
+                    with cb1:
+                        biz_sel_ed = st.selectbox(
+                            "Negocio / fuente",
+                            INCOME_BUSINESSES,
+                            index=_biz_ix,
+                        )
+                        biz_other_ed = st.text_input("Si negocio = Otro", value=_biz_other)
+                    with cb2:
+                        cat_sel_ed = st.selectbox(
+                            "Rubro del gasto",
+                            EXPENSE_CATEGORIES,
+                            index=_cat_ix,
+                        )
+                        cat_other_ed = st.text_input("Si rubro = Otro", value=_cat_other)
+                    tag_sel_ed = st.selectbox("Etiqueta (opcional)", _tag_opts_ed, index=_tg_ix)
+                    tag_other_ed = st.text_input("Etiqueta libre si elegiste Otro", value=_tg_other)
+                    fee_amt_ed = st.number_input(
+                        "Comisión / fee (opcional)",
+                        min_value=0.0,
+                        value=float(_fee_val),
+                        step=float(_step_ed),
+                        format=_fmt_ed,
+                    )
+                    _fee_cur_opts_ed = list(dict.fromkeys([_acur_ed, "USD", "USDT", "VES"]))
+                    _fc_def = str(sel_tx.get("fee_currency") or _acur_ed)
+                    _fc_ix = (
+                        _fee_cur_opts_ed.index(_fc_def) if _fc_def in _fee_cur_opts_ed else 0
+                    )
+                    fee_cur_ed = st.selectbox("Moneda de la comisión", _fee_cur_opts_ed, index=_fc_ix)
+                    notes_ed = st.text_area(
+                        "Notas (opcional)",
+                        value=str(sel_tx.get("transaction_notes") or ""),
+                        height=60,
+                    )
+                    if st.form_submit_button("Guardar cambios"):
+                        if tx_type_ed == "ingreso":
+                            business_ed = _pick_list_value(biz_sel_ed, biz_other_ed)
+                            category_ed = None
+                        else:
+                            business_ed = None
+                            category_ed = _pick_list_value(cat_sel_ed, cat_other_ed)
+                        transfer_tag_ed = _resolve_transfer_tag(tag_sel_ed, tag_other_ed)
+                        upd: dict[str, Any] = {
+                            "account_id": str(cta_ed),
+                            "tx_type": tx_type_ed,
+                            "amount": float(amt_ed),
+                            "tx_date": tx_date_ed.isoformat(),
+                            "description": desc_ed.strip() or "(sin descripción)",
+                            "category": category_ed,
+                            "business": business_ed,
+                            "transfer_tag": transfer_tag_ed,
+                            "transaction_notes": notes_ed.strip() or None,
+                        }
+                        if fee_amt_ed and float(fee_amt_ed) > 0:
+                            upd["fee_amount"] = float(fee_amt_ed)
+                            upd["fee_currency"] = fee_cur_ed
+                        else:
+                            upd["fee_amount"] = None
+                            upd["fee_currency"] = None
+                        if sel_tx.get("counterpart_account_id"):
+                            upd["counterpart_account_id"] = str(sel_tx.get("counterpart_account_id"))
+                        if sel_tx.get("transfer_group_id"):
+                            upd["transfer_group_id"] = str(sel_tx.get("transfer_group_id"))
+                        ok_ed, wmsg_ed = kf_transaction_update_flexible(sb, _tid, upd)
+                        if ok_ed:
+                            if wmsg_ed:
+                                st.warning(wmsg_ed)
+                            else:
+                                st.success("Movimiento actualizado.")
+                            st.rerun()
+                        else:
+                            st.error("No se pudo guardar.")
+                            st.code(wmsg_ed or "")
+
             del_id = st.text_input("Eliminar por ID (uuid)", placeholder="…")
             if st.button("Eliminar") and del_id.strip():
                 sb.table("kf_transaction").delete().eq("id", del_id.strip()).execute()
