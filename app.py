@@ -6,6 +6,7 @@ Supabase: schema.sql + patch_002 si la base ya existía sin usuarios.
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -87,6 +88,38 @@ def kf_account_update_flexible(sb: Client, acc_id: str, row: dict[str, Any]) -> 
             return False, f"{first}\n---\n{str(e2)}"
         return True, (
             "Guardado parcial. Ejecutá **`patch_004`** y **`patch_005_account_kind.sql`** en Supabase."
+        )
+
+
+_TX_MIN_FIELDS = frozenset(
+    {"account_id", "user_id", "tx_type", "amount", "tx_date", "description"}
+)
+
+
+def kf_transaction_insert_flexible(sb: Client, row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Inserta movimiento; sin patch_007 omite counterpart_account_id y transfer_group_id."""
+    try:
+        sb.table("kf_transaction").insert(row).execute()
+        return True, None
+    except Exception as e:
+        first = str(e)
+        core = {k: v for k, v in row.items() if k in _TX_MIN_FIELDS}
+        for k in (
+            "category",
+            "business",
+            "transaction_notes",
+            "transfer_tag",
+            "fee_amount",
+            "fee_currency",
+        ):
+            if k in row and row[k] is not None:
+                core[k] = row[k]
+        try:
+            sb.table("kf_transaction").insert(core).execute()
+        except Exception as e2:
+            return False, f"{first}\n---\n{str(e2)}"
+        return True, (
+            "Guardado sin enlace de traspaso. En Supabase ejecutá **`patch_007_transaction_counterpart.sql`**."
         )
 
 
@@ -1054,95 +1087,294 @@ def main() -> None:
         t1, t2, t3 = st.tabs(["Registrar", "Saldo inicial", "Importar Excel"])
 
         with t1:
-            acur = str(acc.get("currency", "USD"))
-            step_f, fmt_f = _amount_input_format(acur)
-            st.caption(f"Movimientos en **{acur}** para la cuenta activa (cambiala en la barra lateral).")
-            with st.form("tx"):
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    tx_type = st.radio("Tipo", ["ingreso", "egreso"], horizontal=True)
-                with col_b:
-                    tx_date = st.date_input("Fecha", value=date.today())
-                amount = st.number_input(
-                    f"Monto principal ({acur})",
-                    min_value=float(step_f),
-                    value=10.0 if acur != "USDT" else 0.01,
-                    step=float(step_f),
-                    format=fmt_f,
+            _opt_keys = list(opts.keys())
+            _def_acc_idx = (
+                _opt_keys.index(str(account_id)) if str(account_id) in _opt_keys else 0
+            )
+
+            st.caption(
+                "**Ingreso / egreso:** indicá en qué **cuenta** queda el movimiento (Zelle, BofA, Binance, bolívares…). "
+                "No tenés que cambiar la cuenta del lateral solo para registrar; el listado de abajo sigue siendo la cuenta activa."
+            )
+            tab_in, tab_out, tab_tr = st.tabs(
+                ["Ingreso (negocio u otros)", "Egreso (gastos)", "Traspaso entre cuentas"]
+            )
+
+            def _resolve_transfer_tag(tag_sel: str, tag_other: str) -> str | None:
+                if tag_sel == "(ninguna)":
+                    return None
+                if tag_sel == "Otro":
+                    return tag_other.strip() or None
+                return tag_sel
+
+            with tab_in:
+                cta_in = st.selectbox(
+                    "Cuenta que **recibió** este ingreso",
+                    _opt_keys,
+                    index=_def_acc_idx,
+                    format_func=lambda i: opts[i],
+                    key="kf_tx_in_account",
                 )
-                description = st.text_input("Descripción / concepto")
-                st.caption(
-                    "**Ingreso:** elegí el negocio. **Egreso:** elegí el rubro del gasto (solo rellená el que corresponda)."
-                )
-                col_biz, col_cat = st.columns(2)
-                with col_biz:
+                acc_in = next(a for a in accounts if str(a["id"]) == str(cta_in))
+                _acur_in = str(acc_in.get("currency", "USD"))
+                _step_in, _fmt_in = _amount_input_format(_acur_in)
+                with st.form("tx_ingreso"):
+                    tx_date = st.date_input("Fecha", value=date.today(), key="txin_d")
+                    amount = st.number_input(
+                        f"Monto ({_acur_in})",
+                        min_value=float(_step_in),
+                        value=10.0 if _acur_in != "USDT" else 0.01,
+                        step=float(_step_in),
+                        format=_fmt_in,
+                        key="txin_amt",
+                    )
+                    description = st.text_input("Descripción / concepto", key="txin_desc")
                     biz_sel = st.selectbox(
-                        "Negocio (ingresos)",
+                        "Negocio / fuente",
                         INCOME_BUSINESSES,
                         index=0,
-                        help="Movi Motors, delivery, Zemog…",
+                        key="txin_biz",
                     )
-                    biz_other = st.text_input("Si negocio = Otro, escribí el nombre")
-                with col_cat:
+                    biz_other = st.text_input("Si negocio = Otro, nombre", key="txin_bio")
+                    tag_opts = ["(ninguna)"] + TRANSFER_TAGS
+                    tag_sel = st.selectbox("Etiqueta (opcional)", tag_opts, key="txin_tag")
+                    tag_other = st.text_input("Etiqueta libre si elegiste Otro", key="txin_tgo")
+                    fee_amt = st.number_input(
+                        "Comisión / fee (opcional)",
+                        min_value=0.0,
+                        value=0.0,
+                        step=float(_step_in),
+                        format=_fmt_in,
+                        key="txin_fee",
+                    )
+                    fee_cur_opts = list(dict.fromkeys([_acur_in, "USD", "USDT", "VES"]))
+                    fee_cur = st.selectbox("Moneda de la comisión", fee_cur_opts, key="txin_fc")
+                    tx_notes = st.text_area("Notas (opcional)", height=50, key="txin_nt")
+                    if st.form_submit_button("Guardar ingreso"):
+                        business = _pick_list_value(biz_sel, biz_other)
+                        transfer_tag = _resolve_transfer_tag(tag_sel, tag_other)
+                        row_ins: dict[str, Any] = {
+                            "account_id": str(cta_in),
+                            "user_id": user["id"],
+                            "tx_type": "ingreso",
+                            "amount": float(amount),
+                            "tx_date": tx_date.isoformat(),
+                            "description": description.strip() or "(sin descripción)",
+                            "category": None,
+                            "business": business,
+                            "transfer_tag": transfer_tag,
+                            "transaction_notes": tx_notes.strip() or None,
+                        }
+                        if fee_amt and float(fee_amt) > 0:
+                            row_ins["fee_amount"] = float(fee_amt)
+                            row_ins["fee_currency"] = fee_cur
+                        ok_tx, wmsg_tx = kf_transaction_insert_flexible(sb, row_ins)
+                        if ok_tx:
+                            if wmsg_tx:
+                                st.warning(wmsg_tx)
+                            else:
+                                st.success("Ingreso guardado.")
+                            st.rerun()
+                        else:
+                            st.error("No se pudo guardar.")
+                            st.code(wmsg_tx or "")
+
+            with tab_out:
+                cta_out = st.selectbox(
+                    "Cuenta de la que **sale** este gasto",
+                    _opt_keys,
+                    index=_def_acc_idx,
+                    format_func=lambda i: opts[i],
+                    key="kf_tx_out_account",
+                )
+                acc_out = next(a for a in accounts if str(a["id"]) == str(cta_out))
+                _acur_out = str(acc_out.get("currency", "USD"))
+                _step_out, _fmt_out = _amount_input_format(_acur_out)
+                with st.form("tx_egreso"):
+                    tx_date = st.date_input("Fecha", value=date.today(), key="txout_d")
+                    amount = st.number_input(
+                        f"Monto ({_acur_out})",
+                        min_value=float(_step_out),
+                        value=10.0 if _acur_out != "USDT" else 0.01,
+                        step=float(_step_out),
+                        format=_fmt_out,
+                        key="txout_amt",
+                    )
+                    description = st.text_input("Descripción / concepto", key="txout_desc")
                     cat_sel = st.selectbox(
-                        "Rubro del gasto (egresos)",
+                        "Rubro del gasto",
                         EXPENSE_CATEGORIES,
                         index=0,
-                        help="Casa, carro, hijos…",
+                        key="txout_cat",
                     )
-                    cat_other = st.text_input("Si rubro = Otro, escribí el nombre")
-                tag_opts = ["(ninguna)"] + TRANSFER_TAGS
-                tag_sel = st.selectbox("Etiqueta (ej. Zelle→Binance, futuros)", tag_opts)
-                tag_other = st.text_input("Texto si usás etiqueta «Otro»")
-                fee_amt = st.number_input(
-                    "Comisión / fee del movimiento (opcional)",
-                    min_value=0.0,
-                    value=0.0,
-                    step=float(step_f),
-                    format=fmt_f,
-                )
-                fee_cur_opts = list(dict.fromkeys([acur, "USD", "USDT", "VES"]))
-                fee_cur = st.selectbox("Moneda de la comisión", fee_cur_opts)
-                tx_notes = st.text_area("Notas del movimiento (opcional)", height=60)
-                if st.form_submit_button("Guardar"):
-                    if tx_type == "ingreso":
-                        business = _pick_list_value(biz_sel, biz_other)
-                        category = None
-                    else:
-                        business = None
+                    cat_other = st.text_input("Si rubro = Otro, nombre", key="txout_cao")
+                    tag_opts2 = ["(ninguna)"] + TRANSFER_TAGS
+                    tag_sel2 = st.selectbox("Etiqueta (opcional)", tag_opts2, key="txout_tag")
+                    tag_other2 = st.text_input("Etiqueta libre si Otro", key="txout_tgo")
+                    fee_amt2 = st.number_input(
+                        "Comisión / fee (opcional)",
+                        min_value=0.0,
+                        value=0.0,
+                        step=float(_step_out),
+                        format=_fmt_out,
+                        key="txout_fee",
+                    )
+                    fee_cur_opts2 = list(dict.fromkeys([_acur_out, "USD", "USDT", "VES"]))
+                    fee_cur2 = st.selectbox("Moneda de la comisión", fee_cur_opts2, key="txout_fc")
+                    tx_notes2 = st.text_area("Notas (opcional)", height=50, key="txout_nt")
+                    if st.form_submit_button("Guardar egreso"):
                         category = _pick_list_value(cat_sel, cat_other)
-                    if tag_sel == "(ninguna)":
-                        transfer_tag = None
-                    elif tag_sel == "Otro":
-                        transfer_tag = tag_other.strip() or None
-                    else:
-                        transfer_tag = tag_sel
-                    row_ins: dict[str, Any] = {
-                        "account_id": account_id,
-                        "user_id": user["id"],
-                        "tx_type": tx_type,
-                        "amount": float(amount),
-                        "tx_date": tx_date.isoformat(),
-                        "description": description.strip() or "(sin descripción)",
-                        "category": category,
-                        "business": business,
-                        "transfer_tag": transfer_tag,
-                        "transaction_notes": tx_notes.strip() or None,
-                    }
-                    if fee_amt and float(fee_amt) > 0:
-                        row_ins["fee_amount"] = float(fee_amt)
-                        row_ins["fee_currency"] = fee_cur
-                    try:
-                        sb.table("kf_transaction").insert(row_ins).execute()
-                    except Exception as e:
-                        st.error(
-                            "No se pudo guardar. Ejecutá en Supabase los parches: "
-                            "`patch_003_business.sql` y `patch_004_accounts_reports.sql`."
+                        transfer_tag = _resolve_transfer_tag(tag_sel2, tag_other2)
+                        row_ins = {
+                            "account_id": str(cta_out),
+                            "user_id": user["id"],
+                            "tx_type": "egreso",
+                            "amount": float(amount),
+                            "tx_date": tx_date.isoformat(),
+                            "description": description.strip() or "(sin descripción)",
+                            "category": category,
+                            "business": None,
+                            "transfer_tag": transfer_tag,
+                            "transaction_notes": tx_notes2.strip() or None,
+                        }
+                        if fee_amt2 and float(fee_amt2) > 0:
+                            row_ins["fee_amount"] = float(fee_amt2)
+                            row_ins["fee_currency"] = fee_cur2
+                        ok_tx, wmsg_tx = kf_transaction_insert_flexible(sb, row_ins)
+                        if ok_tx:
+                            if wmsg_tx:
+                                st.warning(wmsg_tx)
+                            else:
+                                st.success("Egreso guardado.")
+                            st.rerun()
+                        else:
+                            st.error("No se pudo guardar.")
+                            st.code(wmsg_tx or "")
+
+            with tab_tr:
+                st.caption(
+                    "Genera **dos movimientos**: egreso en el origen e ingreso en el destino (ej. Zelle USD → Binance USDT por P2P). "
+                    "Los saldos de cada cuenta se actualizan solos."
+                )
+                _to_idx_tr = 1 if len(_opt_keys) > 1 else 0
+                with st.form("tx_traspaso"):
+                    fc1, fc2 = st.columns(2)
+                    with fc1:
+                        fid = st.selectbox(
+                            "Origen (egreso)",
+                            _opt_keys,
+                            index=0,
+                            format_func=lambda i: opts[i],
+                            key="kf_tr_from",
                         )
-                        st.code(str(e))
+                    with fc2:
+                        tid = st.selectbox(
+                            "Destino (ingreso)",
+                            _opt_keys,
+                            index=_to_idx_tr,
+                            format_func=lambda i: opts[i],
+                            key="kf_tr_to",
+                        )
+                    tx_date_tr = st.date_input("Fecha", value=date.today(), key="txtr_d")
+                    desc_tr = st.text_input("Descripción (ej. P2P Zelle → Binance)", key="txtr_desc")
+                    acc_fr = next(a for a in accounts if str(a["id"]) == str(fid))
+                    acc_to = next(a for a in accounts if str(a["id"]) == str(tid))
+                    cur_fr = str(acc_fr.get("currency", "USD"))
+                    cur_to = str(acc_to.get("currency", "USD"))
+                    st.caption(f"Moneda origen **{cur_fr}** → Moneda destino **{cur_to}**")
+                    if cur_fr == cur_to:
+                        m_rec = st.number_input(
+                            f"Monto que **entra** en destino ({cur_to})",
+                            min_value=0.00000001,
+                            value=10.0 if cur_to != "USDT" else 0.01,
+                            step=_amount_input_format(cur_to)[0],
+                            format=_amount_input_format(cur_to)[1],
+                            key="txtr_rec",
+                        )
+                        m_fee = st.number_input(
+                            f"Comisión / diferencia (sale del origen, {cur_fr}; no suma al destino)",
+                            min_value=0.0,
+                            value=0.0,
+                            step=_amount_input_format(cur_fr)[0],
+                            format=_amount_input_format(cur_fr)[1],
+                            key="txtr_fee",
+                        )
+                        m_send = float(m_rec) + float(m_fee)
                     else:
-                        st.success("Movimiento guardado.")
-                        st.rerun()
+                        m_send = st.number_input(
+                            f"Monto que **sale** del origen ({cur_fr}) — incluí fees del camino si querés",
+                            min_value=0.00000001,
+                            value=10.0 if cur_fr != "USDT" else 0.01,
+                            step=_amount_input_format(cur_fr)[0],
+                            format=_amount_input_format(cur_fr)[1],
+                            key="txtr_send",
+                        )
+                        m_rec = st.number_input(
+                            f"Monto que **entra** al destino ({cur_to})",
+                            min_value=0.00000001,
+                            value=10.0 if cur_to != "USDT" else 0.01,
+                            step=_amount_input_format(cur_to)[0],
+                            format=_amount_input_format(cur_to)[1],
+                            key="txtr_recv",
+                        )
+                    tx_notes_tr = st.text_area("Notas (opcional)", height=40, key="txtr_nt")
+                    if st.form_submit_button("Registrar traspaso"):
+                        if str(fid) == str(tid):
+                            st.error("Origen y destino no pueden ser la misma cuenta.")
+                        else:
+                            gid = str(uuid.uuid4())
+                            lbl_f = str(acc_fr.get("label") or "Origen")
+                            lbl_t = str(acc_to.get("label") or "Destino")
+                            base_desc = (desc_tr.strip() or "Traspaso interno")[:200]
+                            row_out: dict[str, Any] = {
+                                "account_id": str(fid),
+                                "user_id": user["id"],
+                                "tx_type": "egreso",
+                                "amount": float(m_send),
+                                "tx_date": tx_date_tr.isoformat(),
+                                "description": f"{base_desc} → {lbl_t}",
+                                "category": None,
+                                "business": None,
+                                "transfer_tag": "Traspaso interno",
+                                "transaction_notes": tx_notes_tr.strip() or None,
+                                "counterpart_account_id": str(tid),
+                                "transfer_group_id": gid,
+                            }
+                            row_in: dict[str, Any] = {
+                                "account_id": str(tid),
+                                "user_id": user["id"],
+                                "tx_type": "ingreso",
+                                "amount": float(m_rec),
+                                "tx_date": tx_date_tr.isoformat(),
+                                "description": f"{base_desc} ← {lbl_f}",
+                                "category": None,
+                                "business": None,
+                                "transfer_tag": "Traspaso interno",
+                                "transaction_notes": tx_notes_tr.strip() or None,
+                                "counterpart_account_id": str(fid),
+                                "transfer_group_id": gid,
+                            }
+                            ok1, w1 = kf_transaction_insert_flexible(sb, row_out)
+                            if not ok1:
+                                st.error("No se pudo registrar el egreso de origen.")
+                                st.code(w1 or "")
+                            else:
+                                ok2, w2 = kf_transaction_insert_flexible(sb, row_in)
+                                if not ok2:
+                                    st.error(
+                                        "Se guardó el egreso pero falló el ingreso en destino. "
+                                        "Revisá movimientos en la cuenta origen y corregí a mano si hace falta."
+                                    )
+                                    st.code(w2 or "")
+                                else:
+                                    if w1 or w2:
+                                        st.warning(
+                                            (w1 or "")
+                                            + ("\n" if w1 and w2 else "")
+                                            + (w2 or "")
+                                        )
+                                    st.success("Traspaso registrado (egreso + ingreso).")
+                                    st.rerun()
 
         with t2:
             st.write(
@@ -1179,9 +1411,25 @@ def main() -> None:
         else:
             df = pd.DataFrame(txs)
             df["registró"] = df["user_id"].map(lambda x: umap.get(str(x), "—") if pd.notna(x) else "—")
-            for col in ("business", "fee_amount", "transfer_tag", "transaction_notes"):
+            for col in (
+                "business",
+                "fee_amount",
+                "transfer_tag",
+                "transaction_notes",
+                "counterpart_account_id",
+            ):
                 if col not in df.columns:
                     df[col] = None
+
+            def _contra_label(cid: Any) -> str:
+                if cid is None or (isinstance(cid, float) and pd.isna(cid)):
+                    return "—"
+                s = str(cid).strip()
+                if not s:
+                    return "—"
+                return str(opts.get(s, s))[:55]
+
+            df["cuenta_relacionada"] = df["counterpart_account_id"].map(_contra_label)
             show = df[
                 [
                     "tx_date",
@@ -1191,6 +1439,7 @@ def main() -> None:
                     "business",
                     "category",
                     "transfer_tag",
+                    "cuenta_relacionada",
                     "description",
                     "registró",
                     "id",

@@ -14,7 +14,7 @@ App Streamlit para registrar **ingresos** y **egresos** (por ejemplo cuenta BofA
 
 1. Creá un **proyecto nuevo** en [Supabase](https://supabase.com) solo para finanzas personales.
 2. En **SQL Editor**, ejecutá **únicamente** `supabase/schema.sql` de este repositorio.
-3. Parches según tu caso: `patch_001` … `patch_004_accounts_reports.sql` (datos de cuenta, comisiones). `patch_005_account_kind.sql` clasifica **banco / wallet / app** (Zinly aparte de Binance y del banco).
+3. Parches según tu caso: `patch_001` … `patch_004_accounts_reports.sql` (datos de cuenta, comisiones). `patch_005_account_kind.sql` clasifica **banco / wallet / app** (Zinly aparte de Binance y del banco). `patch_007_transaction_counterpart.sql` habilita **traspasos entre cuentas** y la columna **cuenta relacionada** en Movimientos.
 4. La app pide **primer administrador** la primera vez; después puede crear usuarios (Orlando, Kenny, etc.). **Importar Excel**: pestaña Movimientos → Importar (mapeo de columnas).
 
 ## 2. Secretos locales
