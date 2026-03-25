@@ -1441,6 +1441,15 @@ def main() -> None:
                     )
                     m_send = float(m_rec) + float(m_fee)
                 else:
+                    tr_cross_mode = st.radio(
+                        "Cómo definir el monto en destino (moneda distinta)",
+                        [
+                            "Manual — cargo lo que sale y lo que entra",
+                            "Tasa P2P / cambio — calculo lo que entra en destino",
+                        ],
+                        key="txtr_xmode_fp",
+                        horizontal=True,
+                    )
                     m_send = float(
                         st.number_input(
                             f"Monto que **sale** del origen ({cur_fr})",
@@ -1451,16 +1460,52 @@ def main() -> None:
                             key="txtr_send_fp",
                         )
                     )
-                    m_rec = float(
-                        st.number_input(
-                            f"Monto que **entra** al destino ({cur_to})",
-                            min_value=0.00000001,
-                            value=10.0 if cur_to != "USDT" else 0.01,
-                            step=_amount_input_format(cur_to)[0],
-                            format=_amount_input_format(cur_to)[1],
-                            key="txtr_recv_fp",
+                    if tr_cross_mode.startswith("Manual"):
+                        m_rec = float(
+                            st.number_input(
+                                f"Monto que **entra** al destino ({cur_to})",
+                                min_value=0.00000001,
+                                value=10.0 if cur_to != "USDT" else 0.01,
+                                step=_amount_input_format(cur_to)[0],
+                                format=_amount_input_format(cur_to)[1],
+                                key="txtr_recv_fp",
+                            )
                         )
-                    )
+                    else:
+                        st.caption(
+                            f"**Tasa** = cuántos **{cur_to}** recibís por **cada 1 {cur_fr}** que sale del origen. "
+                            f"Ej.: vendés **USDT** y cobrás en **bolívares**: si en Binance P2P cerraste a **350 Bs por USDT**, "
+                            f"poné **350** abajo."
+                        )
+                        _r_step, _r_fmt = (
+                            (0.000001, "%.6f")
+                            if cur_to == "USDT"
+                            else (0.01, "%.2f")
+                        )
+                        _r_default = (
+                            350.0
+                            if cur_fr == "USDT" and cur_to == "VES"
+                            else (0.0001 if cur_to == "USDT" else 1.0)
+                        )
+                        rate = float(
+                            st.number_input(
+                                f"{cur_to} por cada 1 {cur_fr} (precio al que vendiste / compraste)",
+                                min_value=float(_r_step),
+                                value=float(_r_default),
+                                step=float(_r_step),
+                                format=_r_fmt,
+                                key="txtr_rate_fp",
+                            )
+                        )
+                        m_rec = m_send * rate
+                        if m_rec <= 0:
+                            st.error("La tasa y el monto deben dar un ingreso en destino mayor a cero.")
+                        else:
+                            _mr = f"{m_rec:,.6f}" if cur_to == "USDT" else f"{m_rec:,.2f}"
+                            st.success(
+                                f"En **{acc_to.get('label') or 'destino'}** entrará **{_mr} {cur_to}** "
+                                f"(= {m_send:g} {cur_fr} × {rate:g})."
+                            )
                 tx_notes_tr = st.text_area("Notas (opcional)", height=40, key="txtr_nt_fp")
                 if st.form_submit_button("Registrar traspaso"):
                     if str(fid) == str(tid):
