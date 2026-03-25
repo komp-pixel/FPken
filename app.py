@@ -206,6 +206,56 @@ def kf_transaction_update_flexible(sb: Client, tx_id: str, row: dict[str, Any]) 
         return False, f"{first}\n---\n{str(e3)}"
 
 
+def kf_transaction_delete_cascade(sb: Client, tx_id: str) -> tuple[bool, str | None, str]:
+    """Elimina un movimiento por UUID. Si pertenece a un traspaso (`transfer_group_id`), borra ambas piernas."""
+    tid = str(tx_id or "").strip()
+    if not tid:
+        return False, "Indicá un UUID.", ""
+    try:
+        r = (
+            sb.table("kf_transaction")
+            .select("id,transfer_group_id")
+            .eq("id", tid)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        try:
+            sb.table("kf_transaction").delete().eq("id", tid).execute()
+            return True, None, "Movimiento eliminado (sin leer grupo de traspaso)."
+        except Exception as e2:
+            return False, f"{e}\n---\n{e2}", ""
+    row = (r.data or [None])[0]
+    if not row:
+        return False, "No hay ningún movimiento con ese ID.", ""
+    gid = row.get("transfer_group_id")
+    if gid is not None and str(gid).strip():
+        try:
+            sb.table("kf_transaction").delete().eq("transfer_group_id", str(gid)).execute()
+            return (
+                True,
+                None,
+                "Traspaso eliminado: se quitaron **origen y destino**; los saldos vuelven como antes de ese traspaso.",
+            )
+        except Exception as e:
+            return False, str(e), ""
+    try:
+        sb.table("kf_transaction").delete().eq("id", tid).execute()
+        return True, None, "Movimiento eliminado."
+    except Exception as e:
+        return False, str(e), ""
+
+
+def _traspaso_group_label(t: dict[str, Any], gid: str, opts: dict[str, str]) -> str:
+    d = str(t.get("tx_date") or "")[:10]
+    tt = str(t.get("tx_type") or "")
+    amt = t.get("amount")
+    de = (str(t.get("description") or "").replace("\n", " "))[:36]
+    sa = str(t.get("account_id") or "")
+    acc_l = str(opts.get(sa, "?"))[:30]
+    return f"{d} · {tt} · {amt} {de}… · {acc_l} · grupo {str(gid)[:8]}…"
+
+
 def _bootstrap_account_result(ok: bool, wmsg: str | None) -> None:
     if ok:
         if wmsg:
@@ -1843,11 +1893,50 @@ def main() -> None:
                                 st.error("No se pudo guardar.")
                                 st.code(wmsg_ed or "")
 
-            del_id = st.text_input("Eliminar por ID (uuid)", placeholder="…")
-            if st.button("Eliminar") and del_id.strip():
-                sb.table("kf_transaction").delete().eq("id", del_id.strip()).execute()
-                st.success("Eliminado.")
-                st.rerun()
+            st.markdown("##### Borrar movimientos")
+            st.caption(
+                "Si borrás un **traspaso** por UUID, se eliminan **las dos piernas** (egreso e ingreso). "
+                "Traspasos sin `transfer_group_id` en la base: borrá cada pierna con su UUID o ejecutá el parche SQL de traspasos."
+            )
+            _by_gid: dict[str, dict[str, Any]] = {}
+            for _t in txs:
+                _g = _t.get("transfer_group_id")
+                if _g is None or (isinstance(_g, float) and pd.isna(_g)):
+                    continue
+                _gs = str(_g).strip()
+                if _gs and _gs not in _by_gid:
+                    _by_gid[_gs] = _t
+            if _by_gid:
+                with st.expander("Eliminar traspaso equivocado (lista de esta cuenta)", expanded=True):
+                    st.caption(
+                        "Solo aparecen traspasos con una pierna en la cuenta del lateral. "
+                        "Al confirmar se borra **el par completo** en todas las cuentas."
+                    )
+                    _glist = list(_by_gid.keys())
+                    _pick_g = st.selectbox(
+                        "Elegí el traspaso a borrar",
+                        options=_glist,
+                        format_func=lambda x: _traspaso_group_label(_by_gid[x], x, opts),
+                        key="kf_del_traspaso_pick",
+                    )
+                    if st.button("Eliminar este traspaso completo", type="primary", key="kf_del_traspaso_btn"):
+                        try:
+                            sb.table("kf_transaction").delete().eq("transfer_group_id", str(_pick_g)).execute()
+                            st.success(
+                                "Traspaso eliminado (origen + destino). Revisá saldos en **ambas** cuentas."
+                            )
+                            st.rerun()
+                        except Exception as e:
+                            st.error("No se pudo borrar.")
+                            st.code(str(e))
+            del_id = st.text_input("O eliminar por ID (uuid de cualquier pierna)", placeholder="…", key="kf_del_uuid")
+            if st.button("Eliminar por UUID", key="kf_del_uuid_btn"):
+                ok_d, err_d, msg_d = kf_transaction_delete_cascade(sb, del_id)
+                if ok_d:
+                    st.success(msg_d)
+                    st.rerun()
+                else:
+                    st.error(err_d or "No se pudo eliminar.")
 
     with tab_acc:
         page_accounts(sb, accounts)
