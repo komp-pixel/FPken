@@ -1498,14 +1498,11 @@ def main() -> None:
                             )
                         )
                         m_rec = m_send * rate
-                        if m_rec <= 0:
-                            st.error("La tasa y el monto deben dar un ingreso en destino mayor a cero.")
-                        else:
-                            _mr = f"{m_rec:,.6f}" if cur_to == "USDT" else f"{m_rec:,.2f}"
-                            st.success(
-                                f"En **{acc_to.get('label') or 'destino'}** entrará **{_mr} {cur_to}** "
-                                f"(= {m_send:g} {cur_fr} × {rate:g})."
-                            )
+                        _mr = f"{m_rec:,.6f}" if cur_to == "USDT" else f"{m_rec:,.2f}"
+                        st.success(
+                            f"En **{acc_to.get('label') or 'destino'}** entrará **{_mr} {cur_to}** "
+                            f"(= {m_send:g} {cur_fr} × {rate:g})."
+                        )
                 tx_notes_tr = st.text_area("Notas (opcional)", height=40, key="txtr_nt_fp")
                 if st.form_submit_button("Registrar traspaso"):
                     if str(fid) == str(tid):
