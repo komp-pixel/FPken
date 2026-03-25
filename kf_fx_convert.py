@@ -62,6 +62,28 @@ def resolve_ves_rates(
     return None, None, "Modo de tasa desconocido."
 
 
+def all_balances_native(
+    sb: Client,
+    accounts: list[dict[str, Any]],
+    load_transactions_fn: Any,
+    compute_balance_fn: Any,
+) -> list[dict[str, Any]]:
+    """Saldos calculados en la moneda nativa de cada cuenta (todas las cuentas)."""
+    rows: list[dict[str, Any]] = []
+    for a in accounts:
+        aid = str(a["id"])
+        txs = load_transactions_fn(sb, aid)
+        bal = compute_balance_fn(a, txs)
+        rows.append(
+            {
+                "Cuenta": a.get("label") or "—",
+                "Moneda": str(a.get("currency", "USD")),
+                "Saldo": float(bal),
+            }
+        )
+    return rows
+
+
 def all_balances_with_ves(
     sb: Client,
     accounts: list[dict[str, Any]],

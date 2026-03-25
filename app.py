@@ -31,7 +31,7 @@ from kf_constants import (
 )
 from kf_bcv import render_bcv_reference
 from kf_dashboard import render_finance_dashboard
-from kf_fx_convert import all_balances_with_ves, resolve_ves_rates, to_ves
+from kf_fx_convert import all_balances_native, all_balances_with_ves, resolve_ves_rates, to_ves
 from kf_p2p_binance import render_usdt_ves_p2p_reference
 from kf_reports import render_reports_page
 
@@ -1266,6 +1266,22 @@ def main() -> None:
     )
 
     with tab_dash:
+        st.markdown("### Saldos por cuenta (todos tus bancos / cuentas)")
+        st.caption(
+            "Saldo **calculado** de cada cuenta. Los gráficos de abajo usan solo la **cuenta activa** del lateral."
+        )
+        try:
+            _all_bal = all_balances_native(sb, accounts, load_transactions, compute_balance)
+            st.dataframe(
+                pd.DataFrame(_all_bal),
+                use_container_width=True,
+                hide_index=True,
+            )
+        except Exception as e:
+            st.warning("No se pudieron cargar todos los saldos de una vez.")
+            st.code(str(e))
+        st.divider()
+        st.markdown("### Gráficos (cuenta del lateral)")
         try:
             render_finance_dashboard(
                 txs,
@@ -1684,9 +1700,19 @@ def main() -> None:
         else:
             df = pd.DataFrame(txs)
             df["registró"] = df["user_id"].map(lambda x: umap.get(str(x), "—") if pd.notna(x) else "—")
-            for col in ("business", "fee_amount", "transfer_tag", "transaction_notes"):
+            for col in ("business", "fee_amount", "transfer_tag", "transaction_notes", "transfer_group_id"):
                 if col not in df.columns:
                     df[col] = None
+
+            def _gid_short_cell_fp(x: Any) -> str:
+                if x is None or (isinstance(x, float) and pd.isna(x)):
+                    return "—"
+                s = str(x).strip()
+                if not s:
+                    return "—"
+                return f"{s[:8]}…" if len(s) > 8 else s
+
+            df["grupo_traspaso"] = df["transfer_group_id"].map(_gid_short_cell_fp)
             show = df[
                 [
                     "tx_date",
@@ -1696,6 +1722,7 @@ def main() -> None:
                     "business",
                     "category",
                     "transfer_tag",
+                    "grupo_traspaso",
                     "description",
                     "registró",
                     "id",
@@ -1929,6 +1956,19 @@ def main() -> None:
                         except Exception as e:
                             st.error("No se pudo borrar.")
                             st.code(str(e))
+            else:
+                _orphan_tr = sum(
+                    1
+                    for _t in txs
+                    if "traspaso" in str(_t.get("transfer_tag") or "").lower()
+                    and not str(_t.get("transfer_group_id") or "").strip()
+                )
+                if _orphan_tr:
+                    st.warning(
+                        f"En **{acc.get('label', 'esta cuenta')}** hay **{_orphan_tr}** traspaso(s) **sin grupo** en la base: "
+                        "no aparecen en la lista de arriba. Borrá **cada pierna** con **Eliminar por UUID** o ejecutá "
+                        "**`patch_007_transaction_counterpart.sql`** en Supabase."
+                    )
             del_id = st.text_input("O eliminar por ID (uuid de cualquier pierna)", placeholder="…", key="kf_del_uuid")
             if st.button("Eliminar por UUID", key="kf_del_uuid_btn"):
                 ok_d, err_d, msg_d = kf_transaction_delete_cascade(sb, del_id)
