@@ -128,6 +128,11 @@ def kf_account_delete_secure(
         return True, "Cuenta eliminada. También se eliminaron sus movimientos."
     except Exception as e:
         return False, str(e)
+<<<<<<< Updated upstream
+=======
+
+
+>>>>>>> Stashed changes
 def kf_transaction_delete_secure(
     sb: Client, tx_id: str, owner_user_id: str
 ) -> tuple[bool, str | None]:
@@ -161,6 +166,75 @@ def kf_transaction_delete_secure(
     return True, "Movimiento eliminado."
 
 
+<<<<<<< Updated upstream
+=======
+_TX_UPDATE_ALLOWED_KEYS = frozenset(
+    {
+        "tx_date",
+        "description",
+        "category",
+        "business",
+        "transfer_tag",
+        "fee_amount",
+        "fee_currency",
+        "transaction_notes",
+    }
+)
+
+
+def kf_transaction_update_secure(
+    sb: Client,
+    tx_id: str,
+    owner_user_id: str,
+    row_update: dict[str, Any],
+) -> tuple[bool, str | None]:
+    tid = str(tx_id or "").strip()
+    if not tid:
+        return False, "Indicá un UUID."
+
+    r = (
+        sb.table("kf_transaction")
+        .select("id,account_id,transfer_group_id")
+        .eq("id", tid)
+        .limit(1)
+        .execute()
+    )
+    row = (r.data or [None])[0]
+    if not row:
+        return False, "No existe ese movimiento."
+
+    acc_id = str(row.get("account_id") or "")
+    if not _account_owned_by_user(sb, acc_id, owner_user_id):
+        return False, "No podés editar movimientos de otra persona."
+
+    upd: dict[str, Any] = {}
+    for k, v in row_update.items():
+        if k in _TX_UPDATE_ALLOWED_KEYS:
+            upd[k] = v
+
+    # Normalizar campos opcionales
+    if "fee_amount" in upd:
+        try:
+            fv = float(upd.get("fee_amount") or 0)
+        except (TypeError, ValueError):
+            fv = 0.0
+        upd["fee_amount"] = fv if fv > 0 else None
+    if "fee_currency" in upd and (upd.get("fee_amount") is None):
+        upd["fee_currency"] = None
+
+    # Si el usuario cambió tx_type o amount manualmente desde la UI, ignoramos esas claves.
+    # (Esta función solo acepta los campos listados en _TX_UPDATE_ALLOWED_KEYS.)
+    if not upd:
+        return False, "No hay cambios para guardar."
+
+    try:
+        sb.table("kf_transaction").update(upd).eq("id", tid).execute()
+        return True, "Movimiento actualizado."
+    except Exception as e:
+        return False, str(e)
+
+
+>>>>>>> Stashed changes
 _TX_MIN_FIELDS = frozenset(
     {"account_id", "user_id", "tx_type", "amount", "tx_date", "description"}
 )
@@ -662,6 +736,11 @@ def load_accounts(sb: Client, owner_user_id: str) -> list[dict[str, Any]]:
             r = sb.table("kf_account").select("*").order("created_at").execute()
             return list(r.data or [])
         raise
+<<<<<<< Updated upstream
+=======
+
+
+>>>>>>> Stashed changes
 def claim_unowned_accounts(sb: Client, owner_user_id: str) -> int:
     try:
         r0 = sb.table("kf_account").select("id", count="exact").is_("owner_user_id", "null").execute()
@@ -1668,6 +1747,107 @@ def main() -> None:
                 lambda x: f"{float(x):,.6f}" if pd.notna(x) and x is not None and float(x) > 0 else "—"
             )
             st.dataframe(show, use_container_width=True, hide_index=True)
+
+            with st.expander("Editar movimiento", expanded=False):
+                st.caption(
+                    "Editá los campos que te faltan (fecha, descripción, negocio/rubro, fee y notas). "
+                    "Si es una pierna de un traspaso (`transfer_group_id`), puede requerir ajustar también la otra pierna."
+                )
+
+                def _tx_label(t: dict[str, Any]) -> str:
+                    td = str(t.get("tx_date") or "")[:10]
+                    tt = str(t.get("tx_type") or "")
+                    am = t.get("amount")
+                    de = str(t.get("description") or "").replace("\n", " ")[:26]
+                    tid = str(t.get("id") or "")
+                    sid = f"{tid[:8]}…" if len(tid) >= 8 else tid
+                    return f"{td} · {tt} · {am} · {de} · id {sid}"
+
+                _pick_ix = st.selectbox(
+                    "Elegí el movimiento",
+                    options=list(range(len(txs))),
+                    format_func=lambda i: _tx_label(txs[i]),
+                    key="kf_tx_edit_pick",
+                )
+                sel_tx = txs[_pick_ix]
+                sel_tid = str(sel_tx.get("id") or "").strip()
+                sel_type = str(sel_tx.get("tx_type") or "")
+
+                def _parse_tx_date(v: Any) -> date:
+                    try:
+                        return date.fromisoformat(str(v)[:10])
+                    except Exception:
+                        return date.today()
+
+                tx_date0 = _parse_tx_date(sel_tx.get("tx_date"))
+                desc0 = str(sel_tx.get("description") or "")
+                fee_amt0_raw = sel_tx.get("fee_amount")
+                try:
+                    fee_amt0 = float(fee_amt0_raw) if fee_amt0_raw is not None else 0.0
+                except (TypeError, ValueError):
+                    fee_amt0 = 0.0
+                fee_cur0 = str(sel_tx.get("fee_currency") or acc.get("currency") or "USD")
+                fee_cur0 = fee_cur0 if fee_cur0 in CURRENCIES else "USD"
+                fee_step, fee_fmt = _amount_input_format(fee_cur0 if fee_cur0 else str(acc.get("currency") or "USD"))
+
+                with st.form(f"kf_tx_edit_{sel_tid[:8]}"):
+                    ed_date = st.date_input("Fecha", value=tx_date0)
+                    ed_desc = st.text_input("Descripción / concepto", value=desc0)
+
+                    if sel_type == "ingreso":
+                        ed_business = st.text_input("Negocio / fuente", value=str(sel_tx.get("business") or ""))
+                        ed_category = None
+                    else:
+                        ed_category = st.text_input("Rubro del gasto", value=str(sel_tx.get("category") or ""))
+                        ed_business = None
+
+                    ed_tag = st.text_input(
+                        "Etiqueta de tramo / motivo (transfer_tag)",
+                        value=str(sel_tx.get("transfer_tag") or ""),
+                    )
+                    ed_fee_amt = st.number_input(
+                        f"Comisión / fee ({fee_cur0})",
+                        min_value=0.0,
+                        value=fee_amt0 if fee_amt0 > 0 else 0.0,
+                        step=float(fee_step),
+                        format=fee_fmt,
+                    )
+                    ed_fee_cur = st.selectbox(
+                        "Moneda de la comisión",
+                        CURRENCIES,
+                        index=CURRENCIES.index(fee_cur0) if fee_cur0 in CURRENCIES else 0,
+                    )
+                    ed_notes = st.text_area(
+                        "Notas (transaction_notes)",
+                        value=str(sel_tx.get("transaction_notes") or ""),
+                        height=70,
+                    )
+
+                    if st.form_submit_button("Guardar cambios"):
+                        upd: dict[str, Any] = {
+                            "tx_date": ed_date.isoformat(),
+                            "description": ed_desc.strip() or "(sin descripción)",
+                            "transfer_tag": ed_tag.strip() or None,
+                            "fee_amount": float(ed_fee_amt),
+                            "fee_currency": ed_fee_cur if float(ed_fee_amt) > 0 else None,
+                            "transaction_notes": ed_notes.strip() or None,
+                        }
+                        if sel_type == "ingreso":
+                            upd["business"] = ed_business.strip() or None
+                            upd["category"] = None
+                        else:
+                            upd["category"] = ed_category.strip() or None
+                            upd["business"] = None
+
+                        ok_upd, msg_upd = kf_transaction_update_secure(
+                            sb, sel_tid, str(user["id"]), upd
+                        )
+                        if ok_upd:
+                            st.success(msg_upd or "Actualizado.")
+                            st.rerun()
+                        else:
+                            st.error(msg_upd or "No se pudo actualizar.")
+
             del_id = st.text_input("Eliminar por ID (uuid)", placeholder="…")
             if st.button("Eliminar") and del_id.strip():
                 ok_del, msg_del = kf_transaction_delete_secure(sb, del_id, str(user["id"]))
