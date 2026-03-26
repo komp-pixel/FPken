@@ -114,8 +114,6 @@ def _account_owned_by_user(sb: Client, account_id: str, owner_user_id: str) -> b
     return bool((r.data or []))
 
 
-<<<<<<< Updated upstream
-=======
 def kf_account_delete_secure(
     sb: Client, account_id: str, owner_user_id: str
 ) -> tuple[bool, str | None]:
@@ -130,9 +128,6 @@ def kf_account_delete_secure(
         return True, "Cuenta eliminada. También se eliminaron sus movimientos."
     except Exception as e:
         return False, str(e)
-
-
->>>>>>> Stashed changes
 def kf_transaction_delete_secure(
     sb: Client, tx_id: str, owner_user_id: str
 ) -> tuple[bool, str | None]:
@@ -667,11 +662,6 @@ def load_accounts(sb: Client, owner_user_id: str) -> list[dict[str, Any]]:
             r = sb.table("kf_account").select("*").order("created_at").execute()
             return list(r.data or [])
         raise
-<<<<<<< Updated upstream
-=======
-
-
->>>>>>> Stashed changes
 def claim_unowned_accounts(sb: Client, owner_user_id: str) -> int:
     try:
         r0 = sb.table("kf_account").select("id", count="exact").is_("owner_user_id", "null").execute()
