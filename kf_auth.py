@@ -104,6 +104,26 @@ def _persist_session_cookie(cm: Any | None, row: dict[str, Any]) -> None:
     )
 
 
+def _clear_session_cookie(cm: Any | None) -> None:
+    if cm is None:
+        return
+    try:
+        cm.delete(KF_SESSION_COOKIE, key="kf_cookie_logout_del")
+    except Exception:
+        pass
+    try:
+        cm.set(
+            KF_SESSION_COOKIE,
+            "",
+            key="kf_cookie_logout_set",
+            path="/",
+            expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+            same_site="lax",
+        )
+    except Exception:
+        pass
+
+
 def _restore_session_from_cookie(sb: Client, cm: Any | None) -> None:
     if cm is None or st.session_state.get("kf_uid"):
         return
@@ -144,10 +164,10 @@ def _restore_session_from_cookie(sb: Client, cm: Any | None) -> None:
 def logout() -> None:
     for k in ("kf_uid", "kf_username", "kf_display_name", "kf_is_admin"):
         st.session_state.pop(k, None)
+    st.session_state["kf_force_logout"] = True
     try:
         cm = safe_cookie_manager()
-        if cm is not None:
-            cm.delete(KF_SESSION_COOKIE, key="kf_cookie_logout")
+        _clear_session_cookie(cm)
     except Exception:
         pass
 
@@ -207,10 +227,15 @@ def count_users(sb: Client) -> int:
 def gate_auth(sb: Client) -> dict[str, Any] | None:
     """Devuelve el usuario logueado o detiene la app con login / bootstrap."""
     cm = safe_cookie_manager()
-    try:
-        _restore_session_from_cookie(sb, cm)
-    except Exception:
-        pass
+    if st.session_state.get("kf_force_logout"):
+        for k in ("kf_uid", "kf_username", "kf_display_name", "kf_is_admin"):
+            st.session_state.pop(k, None)
+        _clear_session_cookie(cm)
+    else:
+        try:
+            _restore_session_from_cookie(sb, cm)
+        except Exception:
+            pass
 
     u = current_user()
     if u:
@@ -260,6 +285,7 @@ def gate_auth(sb: Client) -> dict[str, Any] | None:
                         st.session_state["kf_username"] = str(row["username"])
                         st.session_state["kf_display_name"] = str(row["display_name"])
                         st.session_state["kf_is_admin"] = True
+                        st.session_state.pop("kf_force_logout", None)
                         _persist_session_cookie(cm, row)
                     st.success("Listo. Ya podés usar la app.")
                     st.rerun()
@@ -280,6 +306,7 @@ def gate_auth(sb: Client) -> dict[str, Any] | None:
                 st.session_state["kf_username"] = str(row["username"])
                 st.session_state["kf_display_name"] = str(row.get("display_name") or row["username"])
                 st.session_state["kf_is_admin"] = bool(row.get("is_admin"))
+                st.session_state.pop("kf_force_logout", None)
                 _persist_session_cookie(cm, row)
                 st.rerun()
 
