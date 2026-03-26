@@ -1172,11 +1172,7 @@ def main() -> None:
     umap = load_user_map(sb)
     balance = compute_balance(acc, txs)
 
-<<<<<<< Updated upstream
-    st.title("Kenny Finanzas")
-=======
     st.title("Finanzas Personales")
->>>>>>> Stashed changes
     st.caption("Espacio personal multiusuario · cada persona ve sus propias cuentas y movimientos")
 
     tab_dash, tab_mov, tab_acc, tab_rep, tab_usr = st.tabs(
