@@ -43,6 +43,7 @@ def _pick_list_value(selected: str, other_text: str) -> str | None:
 
 _KF_ACCOUNT_CORE_FIELDS = frozenset(
     {
+        "owner_user_id",
         "label",
         "currency",
         "bank_name",
@@ -68,7 +69,8 @@ def kf_account_insert_flexible(sb: Client, row: dict[str, Any]) -> tuple[bool, s
             return False, f"{first}\n---\n{str(e2)}"
         return True, (
             "Creado con datos mínimos. En Supabase ejecutá **`patch_004_accounts_reports.sql`**, "
-            "**`patch_005_account_kind.sql`** y **`patch_006_wallet_deposit.sql`** para guardar "
+            "**`patch_005_account_kind.sql`**, **`patch_006_wallet_deposit.sql`** y "
+            "**`patch_008_owner_user_scope.sql`** para guardar "
             "tipo, wallet extendida (UID, Pay ID, depósito on-chain) y clasificación."
         )
 
@@ -626,6 +628,23 @@ def load_accounts(sb: Client, owner_user_id: str) -> list[dict[str, Any]]:
             r = sb.table("kf_account").select("*").order("created_at").execute()
             return list(r.data or [])
         raise
+<<<<<<< Updated upstream
+=======
+
+
+def claim_unowned_accounts(sb: Client, owner_user_id: str) -> int:
+    try:
+        r0 = sb.table("kf_account").select("id", count="exact").is_("owner_user_id", "null").execute()
+        c0 = int(getattr(r0, "count", 0) or 0)
+        if c0 <= 0:
+            return 0
+        sb.table("kf_account").update({"owner_user_id": str(owner_user_id)}).is_("owner_user_id", "null").execute()
+        r1 = sb.table("kf_account").select("id", count="exact").eq("owner_user_id", str(owner_user_id)).execute()
+        c1 = int(getattr(r1, "count", 0) or 0)
+        return c1
+    except Exception:
+        return 0
+>>>>>>> Stashed changes
 
 
 def load_transactions(sb: Client, account_id: str) -> list[dict[str, Any]]:
@@ -1002,6 +1021,20 @@ def main() -> None:
 
     if not accounts:
         st.title("Finanzas Personales")
+<<<<<<< Updated upstream
+=======
+        st.warning(
+            "No hay cuentas visibles para este usuario. Si acabás de crear una y no aparece, "
+            "puede haber quedado sin propietario por una versión anterior."
+        )
+        if st.button("Reparar y asignar cuentas sin propietario a mi usuario", key="kf_fix_owner_claim"):
+            nfix = claim_unowned_accounts(sb, str(user["id"]))
+            if nfix > 0:
+                st.success(f"Reparación aplicada. Cuentas visibles ahora: {nfix}.")
+                st.rerun()
+            else:
+                st.info("No se encontraron cuentas sin propietario para reparar.")
+>>>>>>> Stashed changes
         st.success(
             "Usuario listo. **Ahora creá la cuenta del banco** (BofA) con el formulario de abajo; "
             "sin eso no hay Dashboard ni movimientos."
