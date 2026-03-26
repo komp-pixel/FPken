@@ -24,6 +24,18 @@ INSTITUTION_WALLET: list[str] = [
     "Otro",
 ]
 
+# Red de depósito on-chain (texto libre si elegís "Otro" en formularios que lo permitan)
+WALLET_DEPOSIT_NETWORKS: list[str] = [
+    "—",
+    "TRC20",
+    "BEP20 (BSC)",
+    "ERC20",
+    "Arbitrum One",
+    "Optimism",
+    "Polygon",
+    "Otro / varias (ver notas)",
+]
+
 # Zinly, Zelle y similares (pagos digitales; no es cuenta corriente ni wallet on-chain)
 INSTITUTION_APPS: list[str] = [
     "Zinly",
