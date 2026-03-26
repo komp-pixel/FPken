@@ -117,9 +117,14 @@ def kf_account_insert_flexible(sb: Client, row: dict[str, Any]) -> tuple[bool, s
         )
 
 
-def kf_account_update_flexible(sb: Client, acc_id: str, row: dict[str, Any]) -> tuple[bool, str | None]:
+def kf_account_update_flexible(
+    sb: Client, acc_id: str, row: dict[str, Any], owner_user_id: str | None = None
+) -> tuple[bool, str | None]:
     try:
-        sb.table("kf_account").update(row).eq("id", acc_id).execute()
+        q = sb.table("kf_account").update(row).eq("id", acc_id)
+        if owner_user_id:
+            q = q.eq("owner_user_id", str(owner_user_id))
+        q.execute()
         return True, None
     except Exception as e:
         first = str(e)
@@ -127,13 +132,61 @@ def kf_account_update_flexible(sb: Client, acc_id: str, row: dict[str, Any]) -> 
         if not core:
             return False, first
         try:
-            sb.table("kf_account").update(core).eq("id", acc_id).execute()
+            q2 = sb.table("kf_account").update(core).eq("id", acc_id)
+            if owner_user_id:
+                q2 = q2.eq("owner_user_id", str(owner_user_id))
+            q2.execute()
         except Exception as e2:
             return False, f"{first}\n---\n{str(e2)}"
         return True, (
             "Guardado parcial. Ejecutá **`patch_004`**, **`patch_005_account_kind.sql`** y "
             "**`patch_006_wallet_deposit.sql`** en Supabase."
         )
+
+
+def _account_owned_by_user(sb: Client, account_id: str, owner_user_id: str) -> bool:
+    r = (
+        sb.table("kf_account")
+        .select("id")
+        .eq("id", str(account_id))
+        .eq("owner_user_id", str(owner_user_id))
+        .limit(1)
+        .execute()
+    )
+    return bool((r.data or []))
+
+
+def kf_transaction_delete_secure(
+    sb: Client, tx_id: str, owner_user_id: str
+) -> tuple[bool, str | None]:
+    tid = str(tx_id or "").strip()
+    if not tid:
+        return False, "Indicá un UUID."
+
+    r = sb.table("kf_transaction").select("id,account_id,transfer_group_id").eq("id", tid).limit(1).execute()
+    row = (r.data or [None])[0]
+    if not row:
+        return False, "No existe ese movimiento."
+
+    acc_id = str(row.get("account_id") or "")
+    if not _account_owned_by_user(sb, acc_id, owner_user_id):
+        return False, "No podés borrar movimientos de otra persona."
+
+    gid = str(row.get("transfer_group_id") or "").strip()
+    if gid:
+        r2 = sb.table("kf_transaction").select("id,account_id").eq("transfer_group_id", gid).limit(200).execute()
+        rows = list(r2.data or [])
+        if not rows:
+            return False, "No se encontraron filas del grupo de traspaso."
+        for rr in rows:
+            aid = str(rr.get("account_id") or "")
+            if not _account_owned_by_user(sb, aid, owner_user_id):
+                return False, "Ese traspaso toca cuentas de otra persona; no se puede borrar desde este usuario."
+        sb.table("kf_transaction").delete().eq("transfer_group_id", gid).execute()
+        return True, "Traspaso eliminado (origen + destino)."
+
+    sb.table("kf_transaction").delete().eq("id", tid).execute()
+    return True, "Movimiento eliminado."
 
 
 _TX_MIN_FIELDS = frozenset(
@@ -400,6 +453,164 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
     )
     st.divider()
 
+<<<<<<< Updated upstream
+=======
+    by_k: dict[str, list[dict[str, Any]]] = {"banco": [], "wallet": [], "app_pagos": []}
+    for a in accounts:
+        by_k[_infer_account_kind(a)].append(a)
+
+    st.markdown("### Dar de alta por tipo")
+    for kind, title in (
+        ("banco", "Cuentas bancarias"),
+        ("wallet", "Wallets y crypto"),
+        ("app_pagos", "Apps de pago (Zinly, Zelle…)"),
+    ):
+        st.markdown(f"#### {title}")
+        if not by_k[kind]:
+            st.caption("Ningún registro de este tipo todavía.")
+
+        if kind == "banco":
+            with st.expander("Agregar cuenta **bancaria**", expanded=False):
+                with st.form("add_banco"):
+                    lb = st.text_input("Nombre (ej. Banesco ahorro)", key="ab_lb")
+                    cur = st.selectbox("Moneda", CURRENCIES, index=0, key="ab_cur")
+                    bn = st.text_input("Nombre del banco", key="ab_bn")
+                    ik = st.selectbox("Institución", INSTITUTION_BANKS, key="ab_ik")
+                    io = st.text_input("Si Otro, especificá", key="ab_io")
+                    hol = st.text_input("Titular", key="ab_h")
+                    an = st.text_input("Número de cuenta / IBAN", key="ab_an")
+                    rt = st.text_input("Routing / ABA / Swift", key="ab_rt")
+                    nt = st.text_area("Notas", height=60, key="ab_nt")
+                    op = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f", key="ab_op")
+                    od = st.date_input("Fecha saldo", value=date.today(), key="ab_od")
+                    if st.form_submit_button("Crear banco"):
+                        inst = _pick_list_value(ik, io) or ik
+                        row = {
+                            "owner_user_id": str(user["id"]),
+                            "account_kind": "banco",
+                            "label": lb.strip() or "Cuenta bancaria",
+                            "currency": cur,
+                            "bank_name": bn.strip() or inst,
+                            "institution_kind": inst,
+                            "holder_name": hol.strip() or None,
+                            "account_number": an.strip() or None,
+                            "routing_or_swift": rt.strip() or None,
+                            "notes": nt.strip() or None,
+                            "opening_balance": float(op),
+                            "opening_balance_date": od.isoformat(),
+                            **_nulls_for_kind("banco"),
+                        }
+                        ok, wmsg = kf_account_insert_flexible(sb, row)
+                        if ok:
+                            if wmsg:
+                                st.warning(wmsg)
+                            else:
+                                st.success("Cuenta bancaria creada.")
+                            st.rerun()
+                        else:
+                            st.error("Error al crear.")
+                            st.code(wmsg or "")
+        elif kind == "wallet":
+            with st.expander("Agregar **wallet / crypto**", expanded=False):
+                st.caption(
+                    "En Binance: **UID** y **Pay ID** salen del perfil / Pay; la **dirección de depósito** "
+                    "la copiás en Wallet → Depositar → moneda y **red** (TRC20, BEP20, etc.)."
+                )
+                with st.form("add_wallet"):
+                    lb = st.text_input("Nombre (ej. Binance spot USDT)", key="aw_lb")
+                    cur = st.selectbox("Moneda", CURRENCIES, index=CURRENCIES.index("USDT"), key="aw_cur")
+                    ik = st.selectbox("Tipo", INSTITUTION_WALLET, key="aw_ik")
+                    io = st.text_input("Si Otro, especificá", key="aw_io")
+                    st.markdown("**Cuenta en el exchange**")
+                    e_uid = st.text_input("UID del exchange (ej. Binance)", key="aw_euid")
+                    pay_id = st.text_input("Pay ID (Binance Pay u otro)", key="aw_pay")
+                    st.markdown("**Depósito on-chain** (para que te envíen desde fuera)")
+                    dep_net = st.selectbox("Red de depósito", WALLET_DEPOSIT_NETWORKS, key="aw_depnet")
+                    dep_addr = st.text_input("Dirección de depósito (esa moneda + red)", key="aw_depaddr")
+                    dep_memo = st.text_input("Memo / Tag (si la red lo pide)", key="aw_depmemo")
+                    waddr = st.text_input(
+                        "Otra referencia (opcional, texto libre)",
+                        key="aw_w",
+                        help="Legado: podés dejar vacío si completaste UID / Pay / dirección arriba.",
+                    )
+                    hol = st.text_input("Titular (opcional)", key="aw_h")
+                    nt = st.text_area("Notas (futuros, redes…)", height=60, key="aw_nt")
+                    op = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f", key="aw_op")
+                    od = st.date_input("Fecha saldo", value=date.today(), key="aw_od")
+                    if st.form_submit_button("Crear wallet"):
+                        inst = _pick_list_value(ik, io) or ik
+                        row = {
+                            "owner_user_id": str(user["id"]),
+                            "account_kind": "wallet",
+                            "label": lb.strip() or "Wallet",
+                            "currency": cur,
+                            "bank_name": inst,
+                            "institution_kind": inst,
+                            "holder_name": hol.strip() or None,
+                            "notes": nt.strip() or None,
+                            "opening_balance": float(op),
+                            "opening_balance_date": od.isoformat(),
+                            **_nulls_for_kind("wallet"),
+                            **_wallet_row_dict(
+                                exchange_uid=e_uid,
+                                pay_id=pay_id,
+                                deposit_address=dep_addr,
+                                deposit_network_sel=str(dep_net),
+                                deposit_memo=dep_memo,
+                                wallet_address_legacy=waddr,
+                            ),
+                        }
+                        ok, wmsg = kf_account_insert_flexible(sb, row)
+                        if ok:
+                            if wmsg:
+                                st.warning(wmsg)
+                            else:
+                                st.success("Wallet creada.")
+                            st.rerun()
+                        else:
+                            st.error("Error al crear.")
+                            st.code(wmsg or "")
+        else:
+            with st.expander("Agregar **app de pagos** (Zinly, Zelle…)", expanded=False):
+                with st.form("add_app"):
+                    lb = st.text_input("Nombre (ej. Zinly compras)", key="aa_lb")
+                    cur = st.selectbox("Moneda", CURRENCIES, index=0, key="aa_cur")
+                    ik = st.selectbox("App", INSTITUTION_APPS, key="aa_ik")
+                    io = st.text_input("Si Otro, especificá", key="aa_io")
+                    zid = st.text_input("Email, teléfono o usuario de la app *", key="aa_z")
+                    hol = st.text_input("Titular (opcional)", key="aa_h")
+                    nt = st.text_area("Notas", height=60, key="aa_nt")
+                    op = st.number_input("Saldo inicial", min_value=-1e15, value=0.0, format="%.8f", key="aa_op")
+                    od = st.date_input("Fecha saldo", value=date.today(), key="aa_od")
+                    if st.form_submit_button("Crear app"):
+                        inst = _pick_list_value(ik, io) or ik
+                        row = {
+                            "owner_user_id": str(user["id"]),
+                            "account_kind": "app_pagos",
+                            "label": lb.strip() or "App",
+                            "currency": cur,
+                            "bank_name": inst,
+                            "institution_kind": inst,
+                            "holder_name": hol.strip() or None,
+                            "zelle_email_or_phone": zid.strip() or None,
+                            "notes": nt.strip() or None,
+                            "opening_balance": float(op),
+                            "opening_balance_date": od.isoformat(),
+                            **_nulls_for_kind("app_pagos"),
+                        }
+                        ok, wmsg = kf_account_insert_flexible(sb, row)
+                        if ok:
+                            if wmsg:
+                                st.warning(wmsg)
+                            else:
+                                st.success("App registrada.")
+                            st.rerun()
+                        else:
+                            st.error("Error al crear.")
+                            st.code(wmsg or "")
+        st.divider()
+
+>>>>>>> Stashed changes
     st.subheader("Editar registro")
     opts = {
         str(a["id"]): f'[{ACCOUNT_KIND_LABELS.get(_infer_account_kind(a), "?")}] {a.get("label")} ({a.get("currency")})'
@@ -547,7 +758,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
                         "zelle_email_or_phone": ezelle.strip() or None,
                     }
                 )
-            ok, wmsg = kf_account_update_flexible(sb, pick, base)
+            ok, wmsg = kf_account_update_flexible(sb, pick, base, str(user["id"]))
             if ok:
                 if wmsg:
                     st.warning(wmsg)
@@ -1927,7 +2138,7 @@ def main() -> None:
                             "opening_balance": float(new_open),
                             "opening_balance_date": new_date.isoformat(),
                         }
-                    ).eq("id", account_id).execute()
+                    ).eq("id", account_id).eq("owner_user_id", str(user["id"])).execute()
                     st.success("Actualizado.")
                     st.rerun()
 
@@ -2085,6 +2296,7 @@ def main() -> None:
                 lambda x: f"{float(x):,.6f}" if pd.notna(x) and x is not None and float(x) > 0 else "—"
             )
             st.dataframe(show, use_container_width=True, hide_index=True)
+<<<<<<< Updated upstream
 
             _opt_keys_ed = list(opts.keys())
             with st.expander("Editar movimiento", expanded=False):
@@ -2316,6 +2528,16 @@ def main() -> None:
                     st.rerun()
                 else:
                     st.error(err_d or "No se pudo eliminar.")
+=======
+            del_id = st.text_input("Eliminar por ID (uuid)", placeholder="…")
+            if st.button("Eliminar") and del_id.strip():
+                ok_del, msg_del = kf_transaction_delete_secure(sb, del_id, str(user["id"]))
+                if ok_del:
+                    st.success(msg_del or "Eliminado.")
+                    st.rerun()
+                else:
+                    st.error(msg_del or "No se pudo eliminar.")
+>>>>>>> Stashed changes
 
     with tab_acc:
         page_accounts(sb, accounts, user)
