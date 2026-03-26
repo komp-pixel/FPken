@@ -628,10 +628,6 @@ def load_accounts(sb: Client, owner_user_id: str) -> list[dict[str, Any]]:
             r = sb.table("kf_account").select("*").order("created_at").execute()
             return list(r.data or [])
         raise
-<<<<<<< Updated upstream
-=======
-
-
 def claim_unowned_accounts(sb: Client, owner_user_id: str) -> int:
     try:
         r0 = sb.table("kf_account").select("id", count="exact").is_("owner_user_id", "null").execute()
@@ -644,7 +640,6 @@ def claim_unowned_accounts(sb: Client, owner_user_id: str) -> int:
         return c1
     except Exception:
         return 0
->>>>>>> Stashed changes
 
 
 def load_transactions(sb: Client, account_id: str) -> list[dict[str, Any]]:
@@ -1021,8 +1016,6 @@ def main() -> None:
 
     if not accounts:
         st.title("Finanzas Personales")
-<<<<<<< Updated upstream
-=======
         st.warning(
             "No hay cuentas visibles para este usuario. Si acabás de crear una y no aparece, "
             "puede haber quedado sin propietario por una versión anterior."
@@ -1034,7 +1027,6 @@ def main() -> None:
                 st.rerun()
             else:
                 st.info("No se encontraron cuentas sin propietario para reparar.")
->>>>>>> Stashed changes
         st.success(
             "Usuario listo. **Ahora creá la cuenta del banco** (BofA) con el formulario de abajo; "
             "sin eso no hay Dashboard ni movimientos."
