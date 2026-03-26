@@ -32,6 +32,14 @@ def _acc_map(accounts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(a["id"]): a for a in accounts}
 
 
+def _is_transfer_like_tx(t: dict[str, Any]) -> bool:
+    gid = str(t.get("transfer_group_id") or "").strip()
+    if gid:
+        return True
+    tag = str(t.get("transfer_tag") or "").strip().lower()
+    return "traspaso" in tag
+
+
 def _insights(df: pd.DataFrame, by_cur: dict[str, dict[str, float]]) -> list[str]:
     lines: list[str] = []
     if df.empty:
@@ -187,8 +195,16 @@ def render_reports_page(
     txs = load_tx_date_range(sb, sel, d0, d1)
     amap = _acc_map(accounts)
 
+    exclude_transfers = st.checkbox(
+        "Excluir traspasos del flujo (recomendado)",
+        value=True,
+        help="Mantiene el reporte como ingresos/egresos reales; los traspasos solo mueven dinero entre cuentas.",
+        key="rep_ex_tr",
+    )
+    txs_use = [t for t in txs if not _is_transfer_like_tx(t)] if exclude_transfers else txs
+
     rows = []
-    for t in txs:
+    for t in txs_use:
         aid = str(t.get("account_id", ""))
         acc = amap.get(aid, {})
         cur = str(acc.get("currency", "USD"))
@@ -210,7 +226,7 @@ def render_reports_page(
     df = pd.DataFrame(rows)
 
     by_cur: dict[str, dict[str, float]] = defaultdict(lambda: {"ing": 0.0, "egr": 0.0})
-    for t in txs:
+    for t in txs_use:
         aid = str(t.get("account_id", ""))
         cur = str(amap.get(aid, {}).get("currency", "USD"))
         amt = float(t.get("amount") or 0)
@@ -231,7 +247,7 @@ def render_reports_page(
                     "business": t.get("business"),
                     "fee_amount": t.get("fee_amount"),
                 }
-                for t in txs
+                for t in txs_use
             ]
         ),
         dict(by_cur),
@@ -266,14 +282,14 @@ def render_reports_page(
                     "business": t.get("business"),
                     "fee_amount": t.get("fee_amount"),
                 }
-                for t in txs
+                for t in txs_use
             ]
         ),
         dict(by_cur),
     )
     detail_head = ["Fecha", "Cuenta", "Mon", "T", "Monto", "Descripción", "Rubro/Neg", "Com.", "Etiqueta"]
     detail_rows = []
-    for t in txs:
+    for t in txs_use:
         aid = str(t.get("account_id", ""))
         acc = amap.get(aid, {})
         cur = str(acc.get("currency", "?"))[:4]

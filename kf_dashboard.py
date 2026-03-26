@@ -17,6 +17,24 @@ def _dec(x: Any) -> Decimal:
     return Decimal(str(x))
 
 
+def _is_transfer_like_df(df: pd.DataFrame) -> pd.Series:
+    if df.empty:
+        return pd.Series([], dtype=bool)
+    tg = (
+        df.get("transfer_group_id")
+        if "transfer_group_id" in df.columns
+        else pd.Series([None] * len(df), index=df.index)
+    )
+    tag = (
+        df.get("transfer_tag")
+        if "transfer_tag" in df.columns
+        else pd.Series([""] * len(df), index=df.index)
+    )
+    tag_s = tag.fillna("").astype(str).str.lower()
+    tg_s = tg.fillna("").astype(str).str.strip()
+    return (tg_s != "") | tag_s.str.contains("traspaso", na=False)
+
+
 def txs_to_dataframe(txs: list[dict[str, Any]]) -> pd.DataFrame:
     if not txs:
         return pd.DataFrame(
@@ -28,6 +46,9 @@ def txs_to_dataframe(txs: list[dict[str, Any]]) -> pd.DataFrame:
                 "category",
                 "business",
                 "user_id",
+                "transfer_tag",
+                "transfer_group_id",
+                "counterpart_account_id",
             ]
         )
     df = pd.DataFrame(txs)
@@ -35,6 +56,9 @@ def txs_to_dataframe(txs: list[dict[str, Any]]) -> pd.DataFrame:
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
     if "business" not in df.columns:
         df["business"] = None
+    for col in ("transfer_tag", "transfer_group_id", "counterpart_account_id"):
+        if col not in df.columns:
+            df[col] = None
     return df
 
 
@@ -45,6 +69,17 @@ def render_finance_dashboard(
 ) -> None:
     df = txs_to_dataframe(txs)
     today = date.today()
+
+    exclude_transfers = st.checkbox(
+        "Excluir traspasos en Ingresos/Egresos (solo flujo real)",
+        value=True,
+        help=(
+            "Los traspasos (egreso+ingreso enlazados) inflan ingresos/egresos del período pero no son "
+            "dinero 'ganado/gastado'. El saldo proyectado se calcula con TODO."
+        ),
+        key="dash_ex_tr",
+    )
+
     range_key = st.selectbox(
         "Vista rápida",
         [
@@ -82,8 +117,16 @@ def render_finance_dashboard(
     else:
         dff = df.copy()
 
-    ing = dff[dff["tx_type"] == "ingreso"]["amount"].sum()
-    egr = dff[dff["tx_type"] == "egreso"]["amount"].sum()
+    if exclude_transfers and len(dff):
+        _is_tr = _is_transfer_like_df(dff)
+        dff_flow = dff.loc[~_is_tr].copy()
+        dff_tr = dff.loc[_is_tr].copy()
+    else:
+        dff_flow = dff.copy()
+        dff_tr = dff.iloc[0:0].copy()
+
+    ing = dff_flow[dff_flow["tx_type"] == "ingreso"]["amount"].sum()
+    egr = dff_flow[dff_flow["tx_type"] == "egreso"]["amount"].sum()
     net = float(ing) - float(egr)
 
     st.markdown(
@@ -127,6 +170,12 @@ def render_finance_dashboard(
             unsafe_allow_html=True,
         )
 
+    if exclude_transfers and len(dff_tr):
+        tr_in = float(dff_tr[dff_tr["tx_type"] == "ingreso"]["amount"].sum())
+        tr_out = float(dff_tr[dff_tr["tx_type"] == "egreso"]["amount"].sum())
+        st.caption(
+            f"Traspasos en el período (excluidos del flujo): entradas {tr_in:,.2f} · salidas {tr_out:,.2f} {currency}."
+        )
     if len(df):
         first_m = date(today.year, today.month, 1)
         last_pm = first_m - timedelta(days=1)
@@ -135,6 +184,9 @@ def render_finance_dashboard(
         m_prv = (df["tx_date"] >= first_pm) & (df["tx_date"] <= last_pm)
         cur = df.loc[m_cur]
         prv = df.loc[m_prv]
+        if exclude_transfers:
+            cur = cur.loc[~_is_transfer_like_df(cur)]
+            prv = prv.loc[~_is_transfer_like_df(prv)]
         ing_c = float(cur[cur["tx_type"] == "ingreso"]["amount"].sum())
         egr_c = float(cur[cur["tx_type"] == "egreso"]["amount"].sum())
         net_c = ing_c - egr_c
@@ -175,23 +227,33 @@ def render_finance_dashboard(
                 help=f"Mes anterior: {net_p:,.2f}",
             )
 
-    if dff.empty:
+    if dff_flow.empty:
         st.info("No hay movimientos en el período elegido.")
         return
 
-    dff = dff.sort_values("tx_date")
-    dff["ing"] = dff.apply(lambda r: float(r["amount"]) if r["tx_type"] == "ingreso" else 0.0, axis=1)
-    dff["egr"] = dff.apply(lambda r: float(r["amount"]) if r["tx_type"] == "egreso" else 0.0, axis=1)
+    dff_flow = dff_flow.sort_values("tx_date")
+    dff_flow["ing"] = dff_flow.apply(
+        lambda r: float(r["amount"]) if r["tx_type"] == "ingreso" else 0.0, axis=1
+    )
+    dff_flow["egr"] = dff_flow.apply(
+        lambda r: float(r["amount"]) if r["tx_type"] == "egreso" else 0.0, axis=1
+    )
 
-    daily = dff.groupby("tx_date", as_index=False).agg(ingreso=("ing", "sum"), egreso=("egr", "sum"))
+    daily = dff_flow.groupby("tx_date", as_index=False).agg(
+        ingreso=("ing", "sum"), egreso=("egr", "sum")
+    )
     daily["neto"] = daily["ingreso"] - daily["egreso"]
 
-    dff["ym"] = pd.to_datetime(dff["tx_date"]).dt.to_period("M").astype(str)
-    monthly = dff.groupby("ym", as_index=False).agg(ingreso=("ing", "sum"), egreso=("egr", "sum"))
+    dff_flow["ym"] = pd.to_datetime(dff_flow["tx_date"]).dt.to_period("M").astype(str)
+    monthly = dff_flow.groupby("ym", as_index=False).agg(
+        ingreso=("ing", "sum"), egreso=("egr", "sum")
+    )
     monthly["neto"] = monthly["ingreso"] - monthly["egreso"]
 
-    dff["yr"] = pd.to_datetime(dff["tx_date"]).dt.year.astype(str)
-    yearly = dff.groupby("yr", as_index=False).agg(ingreso=("ing", "sum"), egreso=("egr", "sum"))
+    dff_flow["yr"] = pd.to_datetime(dff_flow["tx_date"]).dt.year.astype(str)
+    yearly = dff_flow.groupby("yr", as_index=False).agg(
+        ingreso=("ing", "sum"), egreso=("egr", "sum")
+    )
     yearly["neto"] = yearly["ingreso"] - yearly["egreso"]
 
     tab_d, tab_m, tab_y, tab_neg, tab_cat = st.tabs(
@@ -265,7 +327,7 @@ def render_finance_dashboard(
         st.plotly_chart(fig_y, use_container_width=True)
 
     with tab_neg:
-        ing_df = dff[dff["tx_type"] == "ingreso"].copy()
+        ing_df = dff_flow[dff_flow["tx_type"] == "ingreso"].copy()
         ing_df["business"] = ing_df["business"].fillna("(sin negocio)")
         if ing_df.empty:
             st.caption("No hay ingresos en el período.")
@@ -292,7 +354,7 @@ def render_finance_dashboard(
             st.plotly_chart(fig_n, use_container_width=True)
 
     with tab_cat:
-        cat_df = dff[dff["tx_type"] == "egreso"].copy()
+        cat_df = dff_flow[dff_flow["tx_type"] == "egreso"].copy()
         cat_df["category"] = cat_df["category"].fillna("(sin categoría)")
         if cat_df.empty:
             st.caption("No hay egresos en el período.")
