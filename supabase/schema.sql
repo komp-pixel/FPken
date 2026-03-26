@@ -12,6 +12,7 @@ create extension if not exists "pgcrypto";
 -- Cuenta (ej. BofA Orlando Linares)
 create table if not exists public.kf_account (
   id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid references public.kf_users (id) on delete set null,
   label text not null,
   bank_name text,
   holder_name text,
@@ -60,6 +61,9 @@ create table if not exists public.kf_transaction (
 create index if not exists kf_transaction_account_date_idx
   on public.kf_transaction (account_id, tx_date desc);
 
+create index if not exists kf_account_owner_user_idx
+  on public.kf_account (owner_user_id);
+
 create index if not exists kf_transaction_user_id_idx on public.kf_transaction (user_id);
 
 alter table public.kf_account enable row level security;
@@ -93,6 +97,6 @@ drop policy if exists "kf_users_auth_all" on public.kf_users;
 create policy "kf_users_auth_all"
   on public.kf_users for all to authenticated using (true) with check (true);
 
-comment on table public.kf_account is 'Cuentas bancarias / efectivo (saldo inicial desde Excel u otro origen).';
+comment on table public.kf_account is 'Cuentas bancarias / efectivo (saldo inicial desde Excel u otro origen), con propietario owner_user_id.';
 comment on table public.kf_users is 'Usuarios de la app (login bcrypt). is_admin puede crear usuarios.';
 comment on table public.kf_transaction is 'Ingresos y egresos; user_id = quién lo registró.';

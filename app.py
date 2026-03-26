@@ -382,7 +382,7 @@ def _wallet_row_dict(
     }
 
 
-def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
+def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, Any]) -> None:
     st.subheader("Cuentas y métodos de pago")
     st.caption(
         "**Banco** = Banesco, BofA, Banca Amiga, Pago Móvil… "
@@ -390,7 +390,8 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
         "**App** = Zinly, Zelle."
     )
     st.info(
-        "SQL en Supabase: **`patch_004`**, **`patch_005_account_kind.sql`**, **`patch_006_wallet_deposit.sql`**."
+        "SQL en Supabase: **`patch_004`**, **`patch_005_account_kind.sql`**, "
+        "**`patch_006_wallet_deposit.sql`** y **`patch_008_owner_user_scope.sql`**."
     )
 
     render_payment_method_cards(
@@ -591,6 +592,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
                     if st.form_submit_button("Crear banco"):
                         inst = _pick_list_value(ik, io) or ik
                         row = {
+                            "owner_user_id": str(user["id"]),
                             "account_kind": "banco",
                             "label": lb.strip() or "Cuenta bancaria",
                             "currency": cur,
@@ -644,6 +646,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
                     if st.form_submit_button("Crear wallet"):
                         inst = _pick_list_value(ik, io) or ik
                         row = {
+                            "owner_user_id": str(user["id"]),
                             "account_kind": "wallet",
                             "label": lb.strip() or "Wallet",
                             "currency": cur,
@@ -688,6 +691,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]]) -> None:
                     if st.form_submit_button("Crear app"):
                         inst = _pick_list_value(ik, io) or ik
                         row = {
+                            "owner_user_id": str(user["id"]),
                             "account_kind": "app_pagos",
                             "label": lb.strip() or "App",
                             "currency": cur,
@@ -772,9 +776,26 @@ def _dec(x: Any) -> Decimal:
     return Decimal(str(x))
 
 
-def load_accounts(sb: Client) -> list[dict[str, Any]]:
-    r = sb.table("kf_account").select("*").order("created_at").execute()
-    return list(r.data or [])
+def load_accounts(sb: Client, owner_user_id: str) -> list[dict[str, Any]]:
+    try:
+        r = (
+            sb.table("kf_account")
+            .select("*")
+            .eq("owner_user_id", str(owner_user_id))
+            .order("created_at")
+            .execute()
+        )
+        return list(r.data or [])
+    except Exception as e:
+        # Compatibilidad temporal para bases que aun no ejecutaron patch_008.
+        if "owner_user_id" in str(e):
+            st.warning(
+                "Tu base aun no tiene aislamiento multiusuario por propietario. "
+                "Ejecuta **`supabase/patch_008_owner_user_scope.sql`**."
+            )
+            r = sb.table("kf_account").select("*").order("created_at").execute()
+            return list(r.data or [])
+        raise
 
 
 def load_transactions(sb: Client, account_id: str) -> list[dict[str, Any]]:
@@ -1278,7 +1299,7 @@ def main() -> None:
         )
 
     try:
-        accounts = load_accounts(sb)
+        accounts = load_accounts(sb, str(user["id"]))
     except Exception:
         st.error(
             "No se pudieron leer las cuentas. Revisá RLS / claves o ejecutá schema.sql + parches."
@@ -1313,6 +1334,7 @@ def main() -> None:
                         sb,
                         {
                             "account_kind": "banco",
+                            "owner_user_id": str(user["id"]),
                             "label": label.strip() or "Cuenta",
                             "currency": cur0,
                             "bank_name": bank.strip() or inst,
@@ -1351,6 +1373,7 @@ def main() -> None:
                         sb,
                         {
                             "account_kind": "wallet",
+                            "owner_user_id": str(user["id"]),
                             "label": label.strip() or "Wallet",
                             "currency": cur0,
                             "bank_name": inst,
@@ -1388,6 +1411,7 @@ def main() -> None:
                         sb,
                         {
                             "account_kind": "app_pagos",
+                            "owner_user_id": str(user["id"]),
                             "label": label.strip() or "App",
                             "currency": cur0,
                             "bank_name": inst,
@@ -1451,7 +1475,7 @@ def main() -> None:
     balance = compute_balance(acc, txs)
 
     st.title("Kenny Finanzas")
-    st.caption("Cuenta compartida · cada movimiento queda registrado con tu usuario")
+    st.caption("Espacio personal multiusuario · cada persona ve sus propias cuentas y movimientos")
 
     tab_dash, tab_mov, tab_acc, tab_rep, tab_usr = st.tabs(
         ["Dashboard", "Movimientos", "Cuentas", "Reportes", "Usuarios"]
@@ -2294,7 +2318,7 @@ def main() -> None:
                     st.error(err_d or "No se pudo eliminar.")
 
     with tab_acc:
-        page_accounts(sb, accounts)
+        page_accounts(sb, accounts, user)
 
     with tab_rep:
         render_reports_page(sb, accounts, umap)
