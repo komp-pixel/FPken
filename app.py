@@ -1,5 +1,5 @@
 """
-Kenny Finanzas — ingresos/egresos compartidos, login, tablero e importación Excel.
+Finanzas Personales — ingresos/egresos compartidos, login, tablero e importación Excel.
 Supabase: schema.sql + patch_002 si la base ya existía sin usuarios.
 """
 
@@ -970,7 +970,7 @@ def import_excel_section(
 
 
 def main() -> None:
-    st.set_page_config(page_title="Kenny Finanzas", layout="wide")
+    st.set_page_config(page_title="Finanzas Personales", layout="wide")
     try:
         sb = get_supabase()
     except Exception as e:
@@ -1001,7 +1001,7 @@ def main() -> None:
         st.stop()
 
     if not accounts:
-        st.title("Kenny Finanzas")
+        st.title("Finanzas Personales")
         st.success(
             "Usuario listo. **Ahora creá la cuenta del banco** (BofA) con el formulario de abajo; "
             "sin eso no hay Dashboard ni movimientos."
@@ -1172,7 +1172,11 @@ def main() -> None:
     umap = load_user_map(sb)
     balance = compute_balance(acc, txs)
 
+<<<<<<< Updated upstream
     st.title("Kenny Finanzas")
+=======
+    st.title("Finanzas Personales")
+>>>>>>> Stashed changes
     st.caption("Espacio personal multiusuario · cada persona ve sus propias cuentas y movimientos")
 
     tab_dash, tab_mov, tab_acc, tab_rep, tab_usr = st.tabs(

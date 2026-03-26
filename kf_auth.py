@@ -1,4 +1,4 @@
-"""Login, cookie firmada y primer administrador — Kenny Finanzas."""
+"""Login, cookie firmada y primer administrador — Finanzas Personales."""
 
 from __future__ import annotations
 
@@ -241,7 +241,7 @@ def gate_auth(sb: Client) -> dict[str, Any] | None:
     if u:
         return u
 
-    st.title("Kenny Finanzas")
+    st.title("Finanzas Personales")
     st.caption("Iniciá sesión para ver movimientos y el tablero.")
 
     try:
