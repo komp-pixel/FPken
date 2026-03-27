@@ -798,6 +798,22 @@ def load_accounts(sb: Client, owner_user_id: str) -> list[dict[str, Any]]:
         raise
 
 
+
+
+def claim_unowned_accounts(sb: Client, owner_user_id: str) -> int:
+    """Asigna filas con owner_user_id NULL al usuario indicado (cuentas huérfanas)."""
+    try:
+        r = sb.table("kf_account").select("id").is_("owner_user_id", "null").execute()
+        rows = r.data or []
+        if not rows:
+            return 0
+        sb.table("kf_account").update({"owner_user_id": str(owner_user_id)}).is_(
+            "owner_user_id", "null"
+        ).execute()
+        return len(rows)
+    except Exception:
+        return 0
+
 def load_transactions(sb: Client, account_id: str) -> list[dict[str, Any]]:
     r = (
         sb.table("kf_transaction")
@@ -1343,6 +1359,22 @@ def main() -> None:
 
     if not accounts:
         st.title("Kenny Finanzas")
+        st.warning(
+            "No hay cuentas visibles para el usuario elegido. Si creaste cuentas antes y no aparecen, "
+            "pueden estar **sin propietario** en la base. Como administrador, revisá también "
+            "**Cuentas de (usuario)** en la barra lateral."
+        )
+        if st.button(
+            "Reparar: asignar cuentas sin propietario al usuario activo",
+            key="kf_fix_owner_claim",
+            help="Solo actualiza filas con propietario vacío; las asigna al usuario del lateral.",
+        ):
+            nfix = claim_unowned_accounts(sb, str(account_owner_id))
+            if nfix > 0:
+                st.success(f"Listo: {nfix} cuenta(s) asignadas.")
+                st.rerun()
+            else:
+                st.info("No hay cuentas huérfanas (sin propietario) para reparar.")
         st.success(
             "Usuario listo. **Ahora creá la cuenta del banco** (BofA) con el formulario de abajo; "
             "sin eso no hay Dashboard ni movimientos."
