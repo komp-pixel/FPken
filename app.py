@@ -1390,14 +1390,18 @@ def main() -> None:
                     str(u["id"]): f"{u.get('display_name') or '?'} ({u.get('username') or '?'})"
                     for u in _urows
                 }
-                _def = _ids.index(str(user["id"])) if str(user["id"]) in _ids else 0
+                _ss_acc = "kf_admin_account_owner_scope"
+                if _ss_acc not in st.session_state or st.session_state[_ss_acc] not in _ids:
+                    st.session_state[_ss_acc] = (
+                        str(user["id"]) if str(user["id"]) in _ids else _ids[0]
+                    )
                 account_owner_id = st.selectbox(
                     "Cuentas de (usuario)",
                     _ids,
-                    index=_def,
                     format_func=lambda i: _labels.get(i, i),
-                    key="kf_admin_account_owner_scope",
-                    help="Como administrador, las cuentas nuevas quedan a nombre del usuario elegido. "
+                    key=_ss_acc,
+                    help="Elegí quién es el dueño de las cuentas que ves y creás. "
+                    "Para cargar cuentas de Sebas, tiene que figurar Sebas aquí (no tu usuario admin). "
                     "Cada usuario solo ve las suyas al iniciar sesión.",
                 )
         st.caption(
@@ -1411,6 +1415,21 @@ def main() -> None:
             "No se pudieron leer las cuentas. Revisá RLS / claves o ejecutá schema.sql + parches."
         )
         st.stop()
+
+    if user.get("is_admin"):
+        try:
+            _urows_banner = load_users_active(sb)
+            _map_b = {
+                str(u["id"]): f"{u.get('display_name') or '?'} ({u.get('username') or '?'})"
+                for u in (_urows_banner or [])
+            }
+            _who = _map_b.get(str(account_owner_id), str(account_owner_id))
+        except Exception:
+            _who = str(account_owner_id)
+        st.info(
+            f"Cuentas mostradas y nuevas altas van a: **{_who}**. "
+            "Si la cuenta es para otra persona, cambiá **Cuentas de (usuario)** en el lateral antes de crear el banco."
+        )
 
     if not accounts:
         st.title("Kenny Finanzas")
