@@ -98,25 +98,54 @@ _KF_ACCOUNT_CORE_FIELDS = frozenset(
 )
 
 
+
+def _patch_account_owner_if_null(sb: Client, account_id: str, owner_user_id: str) -> None:
+    """Si tras insert owner_user_id quedó NULL, lo asigna (el listado filtra por propietario)."""
+    if not account_id or not owner_user_id:
+        return
+    try:
+        sb.table("kf_account").update({"owner_user_id": str(owner_user_id)}).eq(
+            "id", str(account_id)
+        ).is_("owner_user_id", "null").execute()
+    except Exception:
+        pass
+
 def kf_account_insert_flexible(sb: Client, row: dict[str, Any]) -> tuple[bool, str | None]:
     """Insert completo; si la BD no tiene patch_004, reintenta solo columnas base."""
+    want_owner = row.get("owner_user_id")
     try:
-        sb.table("kf_account").insert(row).execute()
+        res = sb.table("kf_account").insert(row).select("id,owner_user_id").execute()
+        if res.data and want_owner:
+            rec = res.data[0]
+            rid = rec.get("id")
+            if rid and rec.get("owner_user_id") in (None, ""):
+                _patch_account_owner_if_null(sb, str(rid), str(want_owner))
         return True, None
     except Exception as e:
         first = str(e)
         core = {k: v for k, v in row.items() if k in _KF_ACCOUNT_CORE_FIELDS}
         try:
-            sb.table("kf_account").insert(core).execute()
+            res = sb.table("kf_account").insert(core).select("id,owner_user_id").execute()
+            if res.data and want_owner:
+                rec = res.data[0]
+                rid = rec.get("id")
+                if rid and rec.get("owner_user_id") in (None, ""):
+                    _patch_account_owner_if_null(sb, str(rid), str(want_owner))
+            return True, (
+                "Creado con datos mínimos. En Supabase ejecutá **`patch_004_accounts_reports.sql`**, "
+                "**`patch_005_account_kind.sql`** y **`patch_006_wallet_deposit.sql`** para guardar "
+                "tipo, wallet extendida (UID, Pay ID, depósito on-chain) y clasificación."
+            )
         except Exception as e2:
-            return False, f"{first}\n---\n{str(e2)}"
-        return True, (
-            "Creado con datos mínimos. En Supabase ejecutá **`patch_004_accounts_reports.sql`**, "
-            "**`patch_005_account_kind.sql`** y **`patch_006_wallet_deposit.sql`** para guardar "
-            "tipo, wallet extendida (UID, Pay ID, depósito on-chain) y clasificación."
-        )
-
-
+            try:
+                sb.table("kf_account").insert(core).execute()
+            except Exception as e3:
+                return False, f"{first}\n---\n{str(e2)}\n---\n{str(e3)}"
+            return True, (
+                "Creado con datos mínimos. En Supabase ejecutá **`patch_004_accounts_reports.sql`**, "
+                "**`patch_005_account_kind.sql`** y **`patch_006_wallet_deposit.sql`** para guardar "
+                "tipo, wallet extendida (UID, Pay ID, depósito on-chain) y clasificación."
+            )
 def kf_account_update_flexible(sb: Client, acc_id: str, row: dict[str, Any]) -> tuple[bool, str | None]:
     try:
         sb.table("kf_account").update(row).eq("id", acc_id).execute()
@@ -1407,6 +1436,22 @@ def main() -> None:
         st.caption(
             "Pestañas: **Dashboard · Movimientos · Cuentas · Reportes · Usuarios** (área principal)."
         )
+        with st.expander("¿No ves una cuenta que acabas de crear?", expanded=False):
+            st.caption(
+                "El listado solo muestra cuentas con **propietario** igual a tu usuario. "
+                "Si la fila quedó sin dueño en la base, tocá reparar."
+            )
+            if st.button(
+                "Asignar cuentas sin propietario a mi usuario",
+                key="kf_sidebar_claim_owner",
+                help="Solo filas con propietario vacío; las asocia al usuario activo (el del lateral).",
+            ):
+                nfix_sb = claim_unowned_accounts(sb, str(account_owner_id))
+                if nfix_sb > 0:
+                    st.success(f"Listo: {nfix_sb} cuenta(s).")
+                    st.rerun()
+                else:
+                    st.caption("No hay cuentas huérfanas para reparar.")
 
     try:
         accounts = load_accounts(sb, str(account_owner_id))
