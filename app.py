@@ -382,7 +382,7 @@ def _wallet_row_dict(
     }
 
 
-def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, Any]) -> None:
+def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, Any], *, account_owner_id: str) -> None:
     st.subheader("Cuentas y métodos de pago")
     st.caption(
         "**Banco** = Banesco, BofA, Banca Amiga, Pago Móvil… "
@@ -592,7 +592,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
                     if st.form_submit_button("Crear banco"):
                         inst = _pick_list_value(ik, io) or ik
                         row = {
-                            "owner_user_id": str(user["id"]),
+                            "owner_user_id": str(account_owner_id),
                             "account_kind": "banco",
                             "label": lb.strip() or "Cuenta bancaria",
                             "currency": cur,
@@ -646,7 +646,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
                     if st.form_submit_button("Crear wallet"):
                         inst = _pick_list_value(ik, io) or ik
                         row = {
-                            "owner_user_id": str(user["id"]),
+                            "owner_user_id": str(account_owner_id),
                             "account_kind": "wallet",
                             "label": lb.strip() or "Wallet",
                             "currency": cur,
@@ -691,7 +691,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
                     if st.form_submit_button("Crear app"):
                         inst = _pick_list_value(ik, io) or ik
                         row = {
-                            "owner_user_id": str(user["id"]),
+                            "owner_user_id": str(account_owner_id),
                             "account_kind": "app_pagos",
                             "label": lb.strip() or "App",
                             "currency": cur,
@@ -831,6 +831,18 @@ def load_transactions_for_accounts(
 def load_user_map(sb: Client) -> dict[str, str]:
     r = sb.table("kf_users").select("id,display_name").execute()
     return {str(x["id"]): str(x.get("display_name") or "") for x in (r.data or [])}
+
+
+def load_users_active(sb: Client) -> list[dict[str, Any]]:
+    """Usuarios activos: el admin elige de quién ver o crear cuentas (owner_user_id)."""
+    r = (
+        sb.table("kf_users")
+        .select("id,display_name,username")
+        .eq("active", True)
+        .order("display_name")
+        .execute()
+    )
+    return list(r.data or [])
 
 
 def compute_balance(account: dict[str, Any], txs: list[dict[str, Any]]) -> Decimal:
@@ -1288,18 +1300,41 @@ def main() -> None:
 
     _inject_responsive_styles()
 
+    account_owner_id = str(user["id"])
+
     with st.sidebar:
         st.markdown(f"**{user['display_name']}**  \n`{user['username']}`")
         if st.button("Cerrar sesión", use_container_width=True):
             logout()
             st.rerun()
         st.divider()
+        if user.get("is_admin"):
+            try:
+                _urows = load_users_active(sb)
+            except Exception:
+                _urows = []
+            if _urows:
+                _ids = [str(u["id"]) for u in _urows]
+                _labels = {
+                    str(u["id"]): f"{u.get('display_name') or '?'} ({u.get('username') or '?'})"
+                    for u in _urows
+                }
+                _def = _ids.index(str(user["id"])) if str(user["id"]) in _ids else 0
+                account_owner_id = st.selectbox(
+                    "Cuentas de (usuario)",
+                    _ids,
+                    index=_def,
+                    format_func=lambda i: _labels.get(i, i),
+                    key="kf_admin_account_owner_scope",
+                    help="Como administrador, las cuentas nuevas quedan a nombre del usuario elegido. "
+                    "Cada usuario solo ve las suyas al iniciar sesión.",
+                )
         st.caption(
             "Pestañas: **Dashboard · Movimientos · Cuentas · Reportes · Usuarios** (área principal)."
         )
 
     try:
-        accounts = load_accounts(sb, str(user["id"]))
+        accounts = load_accounts(sb, str(account_owner_id))
     except Exception:
         st.error(
             "No se pudieron leer las cuentas. Revisá RLS / claves o ejecutá schema.sql + parches."
@@ -1334,7 +1369,7 @@ def main() -> None:
                         sb,
                         {
                             "account_kind": "banco",
-                            "owner_user_id": str(user["id"]),
+                            "owner_user_id": str(account_owner_id),
                             "label": label.strip() or "Cuenta",
                             "currency": cur0,
                             "bank_name": bank.strip() or inst,
@@ -1373,7 +1408,7 @@ def main() -> None:
                         sb,
                         {
                             "account_kind": "wallet",
-                            "owner_user_id": str(user["id"]),
+                            "owner_user_id": str(account_owner_id),
                             "label": label.strip() or "Wallet",
                             "currency": cur0,
                             "bank_name": inst,
@@ -1411,7 +1446,7 @@ def main() -> None:
                         sb,
                         {
                             "account_kind": "app_pagos",
-                            "owner_user_id": str(user["id"]),
+                            "owner_user_id": str(account_owner_id),
                             "label": label.strip() or "App",
                             "currency": cur0,
                             "bank_name": inst,
@@ -2318,7 +2353,7 @@ def main() -> None:
                     st.error(err_d or "No se pudo eliminar.")
 
     with tab_acc:
-        page_accounts(sb, accounts, user)
+        page_accounts(sb, accounts, user, account_owner_id=account_owner_id)
 
     with tab_rep:
         render_reports_page(sb, accounts, umap)
