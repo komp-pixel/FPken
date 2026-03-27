@@ -136,6 +136,39 @@ def kf_account_update_flexible(sb: Client, acc_id: str, row: dict[str, Any]) -> 
         )
 
 
+
+
+def _account_owned_by_user(sb: Client, account_id: str, owner_user_id: str) -> bool:
+    r = (
+        sb.table("kf_account")
+        .select("id")
+        .eq("id", str(account_id))
+        .eq("owner_user_id", str(owner_user_id))
+        .limit(1)
+        .execute()
+    )
+    return bool(r.data)
+
+
+def kf_account_delete_secure(
+    sb: Client, account_id: str, owner_user_id: str
+) -> tuple[bool, str | None]:
+    aid = str(account_id or "").strip()
+    if not aid:
+        return False, "ID de cuenta inválido."
+    if not _account_owned_by_user(sb, aid, owner_user_id):
+        return (
+            False,
+            "No podés eliminar cuentas que no correspondan al usuario activo "
+            "(si sos admin, elegí la persona en «Cuentas de (usuario)» en el lateral).",
+        )
+    try:
+        sb.table("kf_account").delete().eq("id", aid).eq("owner_user_id", str(owner_user_id)).execute()
+        return True, "Cuenta eliminada. También se eliminaron sus movimientos asociados."
+    except Exception as e:
+        return False, str(e)
+
+
 _TX_MIN_FIELDS = frozenset(
     {"account_id", "user_id", "tx_type", "amount", "tx_date", "description"}
 )
@@ -557,6 +590,28 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
             else:
                 st.error("No se pudo guardar.")
                 st.code(wmsg or "")
+
+    st.markdown("### Eliminar registro")
+    st.caption(
+        "Si esta cuenta se creó duplicada o por error, podés borrarla aquí. "
+        "Se eliminan también todos los movimientos de esa cuenta."
+    )
+    _confirm_del = st.checkbox(
+        "Confirmo que quiero eliminar este registro y sus movimientos",
+        key=f"kf_del_acc_confirm_{pick}",
+    )
+    if st.button("Eliminar este registro", type="primary", key=f"kf_del_acc_btn_{pick}"):
+        if not _confirm_del:
+            st.warning("Marcá la confirmación antes de eliminar.")
+        else:
+            ok_del, msg_del = kf_account_delete_secure(sb, pick, str(account_owner_id))
+            if ok_del:
+                st.success(msg_del or "Cuenta eliminada.")
+                st.rerun()
+            else:
+                st.error(msg_del or "No se pudo eliminar la cuenta.")
+
+
 
     st.divider()
 
