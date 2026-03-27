@@ -1,0 +1,12 @@
+---
+description: FPken — evolución gradual sin perder lo ya hecho (commits encadenados)
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Kenny Finanzas (FPken): mejorar sin dejar atrás lo bueno
+
+- Cada mejora se apoya en **`main` actual**: `git pull` antes de trabajar; commits **añaden** o **ajustan**, no reemplazan el proyecto entero sin revisión.
+- Al resolver conflictos: **conservar** funcionalidades de ambas partes cuando sea posible; nunca subir marcadores de merge.
+- Evitar copiar/pegar una versión vieja de `app.py` sobre una nueva: eso **borra** lo que ya se había mergeado bien.
+- Tras el cambio, verificar que lo que ya existía (login, cuentas, multiusuario, botones de reparar/eliminar, etc.) sigue presente en el código.
