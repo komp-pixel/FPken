@@ -52,6 +52,15 @@ def _filename_date(d: date) -> str:
     return d.strftime("%d-%m-%Y")
 
 
+def _single_account_label(rows: list[dict[str, Any]], key: str = "cuenta") -> str | None:
+    """Si todas las filas comparten la misma cuenta (no vacía), devuelve esa etiqueta; si no, None."""
+    labs = {str(r.get(key) or "").strip() for r in rows}
+    labs.discard("")
+    if len(labs) == 1:
+        return next(iter(labs))
+    return None
+
+
 def _st_df_preview(
     df: pd.DataFrame,
     preview_n: int,
@@ -1485,8 +1494,12 @@ def render_reports_page(
     st.caption(
         "**Entradas:** de qué **negocio / fuente** y en **qué cuenta** quedó el dinero. "
         "**Salidas:** de **qué cuenta** salió y en **qué rubro** registraste el gasto. "
-        "Respeta la misma opción de **excluir traspasos** que arriba."
+        "Si en una moneda **solo hay una cuenta** de ingreso o de egreso, el reporte **une** la vista "
+        "«cuenta + rubro/negocio» con la de «solo rubro/negocio» para no repetir números."
+        " Respeta la misma opción de **excluir traspasos** que arriba."
     )
+    skip_15_rubro_only: dict[str, bool] = {}
+    skip_16_negocio_only: dict[str, bool] = {}
     if not analysis:
         st.caption("Sin movimientos de flujo en el período: no hay tablas 1.1.")
     else:
@@ -1494,16 +1507,32 @@ def render_reports_page(
             cur = blk["currency"]
             st.markdown(f"**Moneda {cur}**")
             inc_rows = blk.get("ingreso_negocio_cuenta") or []
+            one_inc_cuenta = _single_account_label(inc_rows, "cuenta") if inc_rows else None
+            skip_16_negocio_only[cur] = bool(one_inc_cuenta and inc_rows)
             if inc_rows:
-                st.markdown("*Ingresos — negocio → cuenta donde entra*")
-                d_inc = pd.DataFrame(inc_rows).rename(
-                    columns={
-                        "negocio": "Negocio / fuente",
-                        "cuenta": "Cuenta donde entra",
-                        "total": f"Total ({cur})",
-                        "pct": "% del total ingresos",
-                    }
-                )
+                if one_inc_cuenta:
+                    st.markdown("*Ingresos — por negocio / fuente*")
+                    st.caption(
+                        f"Todo ingresa en **{one_inc_cuenta}** (una sola cuenta en esta moneda; "
+                        "misma información que «solo por negocio», sin repetir la columna cuenta)."
+                    )
+                    d_inc = pd.DataFrame(inc_rows)[["negocio", "total", "pct"]].rename(
+                        columns={
+                            "negocio": "Negocio / fuente",
+                            "total": f"Total ({cur})",
+                            "pct": "% del total ingresos",
+                        }
+                    )
+                else:
+                    st.markdown("*Ingresos — negocio → cuenta donde entra*")
+                    d_inc = pd.DataFrame(inc_rows).rename(
+                        columns={
+                            "negocio": "Negocio / fuente",
+                            "cuenta": "Cuenta donde entra",
+                            "total": f"Total ({cur})",
+                            "pct": "% del total ingresos",
+                        }
+                    )
                 for c in d_inc.columns:
                     if "%" in str(c):
                         d_inc[c] = pd.to_numeric(d_inc[c], errors="coerce").round(0)
@@ -1514,17 +1543,34 @@ def render_reports_page(
                 )
             else:
                 st.caption("Sin ingresos en esta moneda en el período.")
+                skip_16_negocio_only[cur] = False
             egr_rows = blk.get("egreso_cuenta_rubro") or []
+            one_egr_cuenta = _single_account_label(egr_rows, "cuenta") if egr_rows else None
+            skip_15_rubro_only[cur] = bool(one_egr_cuenta and egr_rows)
             if egr_rows:
-                st.markdown("*Egresos — cuenta de la que sale → rubro*")
-                d_egr = pd.DataFrame(egr_rows).rename(
-                    columns={
-                        "cuenta": "Cuenta de la que sale",
-                        "rubro": "Rubro / gasto",
-                        "total": f"Total ({cur})",
-                        "pct": "% del total egresos",
-                    }
-                )
+                if one_egr_cuenta:
+                    st.markdown("*Egresos — por rubro*")
+                    st.caption(
+                        f"Todo sale de **{one_egr_cuenta}** (una sola cuenta de pago; "
+                        "evitamos duplicar la misma tabla «por rubro» más abajo)."
+                    )
+                    d_egr = pd.DataFrame(egr_rows)[["rubro", "total", "pct"]].rename(
+                        columns={
+                            "rubro": "Rubro / gasto",
+                            "total": f"Total ({cur})",
+                            "pct": "% del total egresos",
+                        }
+                    )
+                else:
+                    st.markdown("*Egresos — cuenta de la que sale → rubro*")
+                    d_egr = pd.DataFrame(egr_rows).rename(
+                        columns={
+                            "cuenta": "Cuenta de la que sale",
+                            "rubro": "Rubro / gasto",
+                            "total": f"Total ({cur})",
+                            "pct": "% del total egresos",
+                        }
+                    )
                 for c in d_egr.columns:
                     if "%" in str(c):
                         d_egr[c] = pd.to_numeric(d_egr[c], errors="coerce").round(0)
@@ -1535,6 +1581,7 @@ def render_reports_page(
                 )
             else:
                 st.caption("Sin egresos en esta moneda en el período.")
+                skip_15_rubro_only[cur] = False
             st.divider()
 
     acc_rows = _flow_by_account(txs_use, amap)
@@ -1557,7 +1604,9 @@ def render_reports_page(
         '<p class="lk-section">📊 1.3 Gráficos por moneda</p>',
         unsafe_allow_html=True,
     )
-    st.caption("Mismos datos que las tablas 1.5 y 1.6; máximo 8 ítems y el resto en **Otros**.")
+    st.caption(
+        "Mismo desglose que **1.1** y, si aplica, las tablas **1.5 / 1.6**; máximo 8 ítems y el resto en **Otros**."
+    )
     if analysis:
         pie_colors = (
             ["#f97316", "#ea580c", "#c2410c", "#9a3412", "#7c2d12", "#fb923c", "#fdba74", "#fed7aa", "#94a3b8"]
@@ -1673,15 +1722,23 @@ def render_reports_page(
             unsafe_allow_html=True,
         )
         st.caption(
-            "Agrupa **solo por rubro**. Para **cuenta + rubro** usá la **1.1**; para ver proporciones, los **gráficos 1.3**."
+            "Agrupa **solo por rubro**. Si en **1.1** ya viste egresos «por rubro» con una sola cuenta de salida, "
+            "aquí se **omite** la repetición. Para **varias cuentas**, la **1.1** muestra el cruce completo."
         )
         if not analysis:
             st.caption("Sin movimientos de flujo en el período para analizar.")
         else:
+            any_15 = False
             for blk in analysis:
                 cur = blk["currency"]
                 egr = blk["egr"]
                 dr = blk.get("rubros") or []
+                if skip_15_rubro_only.get(cur):
+                    st.caption(
+                        f"**{cur}:** mismo desglose por rubro que en **1.1** (una sola cuenta de egreso)."
+                    )
+                    continue
+                any_15 = True
                 st.markdown(f"**Moneda {cur}** — total egresos en flujo **{egr:,.2f}**")
                 if dr:
                     d5 = pd.DataFrame(dr).rename(
@@ -1693,17 +1750,29 @@ def render_reports_page(
                     st.dataframe(d5, use_container_width=True, hide_index=True)
                 else:
                     st.caption("Sin egresos con rubro en esta moneda.")
+            if not any_15 and analysis:
+                st.caption("Todas las monedas con egresos ya muestran el desglose por rubro en **1.1** (una cuenta).")
 
         st.markdown(
             '<p class="lk-section">🔺 1.6 Ingresos por negocio solo (por moneda)</p>',
             unsafe_allow_html=True,
         )
-        st.caption("Agrupa **solo por negocio**. Para **negocio + cuenta** usá la **1.1**.")
+        st.caption(
+            "Agrupa **solo por negocio**. Si en **1.1** ya viste ingresos con **una sola cuenta** destino, "
+            "aquí se **omite** la repetición."
+        )
         if analysis:
+            any_16 = False
             for blk in analysis:
                 cur = blk["currency"]
                 ing = blk["ing"]
                 dn = blk.get("negocios") or []
+                if skip_16_negocio_only.get(cur):
+                    st.caption(
+                        f"**{cur}:** mismo desglose por negocio que en **1.1** (una sola cuenta de ingreso)."
+                    )
+                    continue
+                any_16 = True
                 st.markdown(f"**Moneda {cur}** — total ingresos en flujo **{ing:,.2f}**")
                 if dn:
                     d6 = pd.DataFrame(dn).rename(
@@ -1719,6 +1788,10 @@ def render_reports_page(
                     st.dataframe(d6, use_container_width=True, hide_index=True)
                 else:
                     st.caption("Sin ingresos con negocio en esta moneda.")
+            if not any_16 and analysis:
+                st.caption(
+                    "Todas las monedas con ingresos ya muestran el desglose por negocio en **1.1** (una cuenta)."
+                )
 
     st.markdown(
         '<p class="lk-section">🔀 2. Traspasos (origen → destino)</p>',
