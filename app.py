@@ -421,6 +421,25 @@ def _filter_transactions_by_period(
     return out
 
 
+def _filter_transactions_by_rubro_descripcion(
+    txs: list[dict[str, Any]], query: str
+) -> list[dict[str, Any]]:
+    """Filtra por texto en `category` (rubro) y `description`; sin query devuelve la lista igual."""
+    q = str(query or "").strip().lower()
+    if not q:
+        return list(txs)
+    tokens = [t for t in q.split() if t]
+    if not tokens:
+        return list(txs)
+
+    def _haystack(t: dict[str, Any]) -> str:
+        c = t.get("category")
+        d = t.get("description")
+        return f"{c if c is not None else ''} {d if d is not None else ''}".lower()
+
+    return [t for t in txs if all(tok in _haystack(t) for tok in tokens)]
+
+
 def _movements_display_dataframe(
     txs: list[dict[str, Any]],
     acc: dict[str, Any],
@@ -2038,40 +2057,67 @@ Así el **panorama** te muestra **de qué negocio entra** el dinero y **dónde l
                 value=date.today(),
                 key="kf_mov_period_to",
             )
+        _mov_search_q = st.text_input(
+            "🔎 Buscar en rubro y descripción",
+            value="",
+            key="kf_mov_search_rubro_desc",
+            placeholder="Ej. Comida · seguro · P2P Zelle…",
+            help="No distingue mayúsculas. Varias palabras: tienen que aparecer **todas** en el rubro o la descripción (juntos).",
+        )
         if _mov_period_from > _mov_period_to:
             st.warning("«Desde» no puede ser posterior a «Hasta».")
             txs_period: list[dict[str, Any]] = []
         else:
             txs_period = _filter_transactions_by_period(txs, _mov_period_from, _mov_period_to)
+        txs_period_view = _filter_transactions_by_rubro_descripcion(txs_period, _mov_search_q)
+        _n_period = len(txs_period)
+        _n_view = len(txs_period_view)
         st.caption(
             f"**{acc.get('label', '—')}** · **Naturaleza:** ↔ traspaso · ↓ gasto · ↑ ingreso · "
             "orden **fecha más reciente arriba**."
         )
-        _show_period = _movements_display_dataframe(txs_period, acc, umap, opts)
-        if _show_period is None:
+        if _mov_search_q.strip() and _n_period:
+            st.caption(f"Búsqueda: **{_n_view}** de **{_n_period}** movimiento(s) en el periodo.")
+        _show_period = _movements_display_dataframe(txs_period_view, acc, umap, opts)
+        if _n_period == 0:
             st.info("No hay movimientos en este periodo para esta cuenta.")
+        elif _show_period is None:
+            st.warning("Ningún movimiento coincide con la búsqueda en **rubro** o **descripción**.")
         else:
             _render_movements_dataframe(_show_period)
-            _r0 = txs_period[0]
+            _r0 = txs_period_view[0]
             _p_last = 6 if str(acc.get("currency")) == "USDT" else 2
             try:
                 _amt0 = float(_r0.get("amount") or 0)
             except (TypeError, ValueError):
                 _amt0 = 0.0
             _amt_s = f"{_amt0:,.{_p_last}f}"
+            _ultimo_lbl = (
+                "**Último movimiento (filtrado):**"
+                if str(_mov_search_q or "").strip()
+                else "**Último movimiento en el periodo:**"
+            )
             st.success(
-                f"**Último movimiento en el periodo:** {_r0.get('tx_date', '—')} · "
+                f"{_ultimo_lbl} {_r0.get('tx_date', '—')} · "
                 f"{_tx_naturaleza_row(_r0)} · {_amt_s} {acc.get('currency', 'USD')} · "
                 f"{str(_r0.get('description') or '')[:96]}"
             )
 
         with st.expander("📜 Historial completo (todas las fechas en esta vista)", expanded=False):
             st.caption(
-                "Misma cuenta del lateral; hasta **5000** movimientos más recientes cargados desde el servidor."
+                "Misma cuenta del lateral; hasta **5000** movimientos más recientes cargados desde el servidor. "
+                "Usa el mismo buscador de **rubro y descripción** de arriba."
             )
-            _show_all = _movements_display_dataframe(txs, acc, umap, opts)
-            if _show_all is None:
+            txs_all_view = _filter_transactions_by_rubro_descripcion(txs, _mov_search_q)
+            _n_all = len(txs)
+            _n_all_v = len(txs_all_view)
+            if _mov_search_q.strip() and _n_all:
+                st.caption(f"Búsqueda: **{_n_all_v}** de **{_n_all}** movimiento(s) cargados.")
+            _show_all = _movements_display_dataframe(txs_all_view, acc, umap, opts)
+            if _n_all == 0:
                 st.write("Todavía no hay movimientos.")
+            elif _show_all is None:
+                st.warning("Ningún movimiento coincide con la búsqueda en **rubro** o **descripción**.")
             else:
                 _render_movements_dataframe(_show_all)
 
