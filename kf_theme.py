@@ -184,8 +184,8 @@ section[data-testid="stMain"] [data-testid="stCaption"] {
     background: linear-gradient(180deg, #e8eef8 0%, #dce4f0 100%) !important;
     border-right: 1px solid #cbd5e1 !important;
     color: #0f172a !important;
-    width: 17rem !important;
-    min-width: 15rem !important;
+    width: 18.5rem !important;
+    min-width: 16rem !important;
 }
 [data-testid="stSidebar"] .block-container {
     padding-top: 0.45rem !important;
@@ -246,10 +246,18 @@ section[data-testid="stMain"] [data-testid="stCaption"] {
     -webkit-text-fill-color: #0f172a !important;
     border: 1px solid #94a3b8 !important;
     font-weight: 600 !important;
-    min-height: 2.1rem !important;
-    padding: 0.2rem 0.45rem !important;
-    font-size: 0.78rem !important;
-    line-height: 1.2 !important;
+    min-height: 2.25rem !important;
+    padding: 0.35rem 0.5rem !important;
+    font-size: 0.8rem !important;
+    line-height: 1.25 !important;
+    overflow: hidden !important;
+    max-width: 100% !important;
+}
+[data-testid="stSidebar"] [data-testid="baseButton-secondary"] > div {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    justify-content: flex-start !important;
 }
 [data-testid="stSidebar"] button[kind="secondary"] p,
 [data-testid="stSidebar"] button[kind="secondary"] span,
@@ -257,6 +265,12 @@ section[data-testid="stMain"] [data-testid="stCaption"] {
 [data-testid="stSidebar"] [data-testid="baseButton-secondary"] span {
     color: #0f172a !important;
     -webkit-text-fill-color: #0f172a !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    text-align: left !important;
 }
 [data-testid="stSidebar"] button[kind="primary"],
 [data-testid="stSidebar"] [data-testid="baseButton-primary"] {

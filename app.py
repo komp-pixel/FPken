@@ -1548,34 +1548,18 @@ def _pick_account_id_sidebar(opts: dict[str, str]) -> str:
         or st.session_state.get("kf_sidebar_account") not in opts
     ):
         st.session_state.kf_sidebar_account = keys[0]
-    st.caption("⚡ Atajos · misma cuenta que el selector")
-    for row_start in range(0, len(keys), 2):
-        c_a, c_b = st.columns(2)
-        with c_a:
-            k = keys[row_start]
-            lab = str(opts[k])
-            short = (lab[:16] + "…") if len(lab) > 18 else lab
-            if st.button(
-                short,
-                key=f"kf_accsh_{k}",
-                use_container_width=True,
-                type="secondary",
-            ):
-                st.session_state.kf_sidebar_account = k
-                st.rerun()
-        with c_b:
-            if row_start + 1 < len(keys):
-                k2 = keys[row_start + 1]
-                lab2 = str(opts[k2])
-                short2 = (lab2[:16] + "…") if len(lab2) > 18 else lab2
-                if st.button(
-                    short2,
-                    key=f"kf_accsh_{k2}",
-                    use_container_width=True,
-                    type="secondary",
-                ):
-                    st.session_state.kf_sidebar_account = k2
-                    st.rerun()
+    st.caption("⚡ Atajos · misma cuenta que el selector · una línea (… si no cabe)")
+    for k in keys:
+        lab = str(opts[k])
+        if st.button(
+            lab,
+            key=f"kf_accsh_{k}",
+            use_container_width=True,
+            type="secondary",
+            help=lab,
+        ):
+            st.session_state.kf_sidebar_account = k
+            st.rerun()
     return str(
         st.selectbox(
             "🏦 Cuenta para movimientos y registro",
