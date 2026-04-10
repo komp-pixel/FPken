@@ -328,7 +328,24 @@ def _is_transfer_tx(t: dict[str, Any]) -> bool:
     return "traspaso" in tag
 
 
-def _transfer_group_row(gid: str, rows: list[dict[str, Any]], opts: dict[str, str]) -> dict[str, Any]:
+def _account_currency_lookup(accounts: list[dict[str, Any]], aid: Any) -> str:
+    if aid is None:
+        return "?"
+    s = str(aid).strip()
+    if not s:
+        return "?"
+    for a in accounts:
+        if str(a.get("id")) == s:
+            return str(a.get("currency", "?"))
+    return "?"
+
+
+def _transfer_group_row(
+    gid: str,
+    rows: list[dict[str, Any]],
+    opts: dict[str, str],
+    accounts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     out = next((r for r in rows if str(r.get("tx_type") or "") == "egreso"), None)
     inn = next((r for r in rows if str(r.get("tx_type") or "") == "ingreso"), None)
     ref = out or inn or rows[0]
@@ -339,6 +356,18 @@ def _transfer_group_row(gid: str, rows: list[dict[str, Any]], opts: dict[str, st
     out_amt = float(out.get("amount") or 0) if out else 0.0
     in_amt = float(inn.get("amount") or 0) if inn else 0.0
     diff_amt = out_amt - in_amt
+    mo = _account_currency_lookup(accounts or [], out.get("account_id") if out else None)
+    md = _account_currency_lookup(accounts or [], inn.get("account_id") if inn else None)
+    if out and inn:
+        cadena_txt = (
+            f"{out_acc} ({mo}) −{out_amt:,.4f} → {in_acc} ({md}) +{in_amt:,.4f}"
+        )
+    elif out:
+        cadena_txt = f"{out_acc} ({mo}) solo egreso −{out_amt:,.4f}"
+    elif inn:
+        cadena_txt = f"{in_acc} ({md}) solo ingreso +{in_amt:,.4f}"
+    else:
+        cadena_txt = "—"
     return {
         "fecha": dt,
         "origen": out_acc,
@@ -349,7 +378,27 @@ def _transfer_group_row(gid: str, rows: list[dict[str, Any]], opts: dict[str, st
         "descripcion": desc,
         "grupo": f"{gid[:8]}…" if len(gid) > 8 else gid,
         "group_id": gid,
+        "moneda_origen": mo,
+        "moneda_destino": md,
+        "cadena_legible": cadena_txt,
     }
+
+
+def _tx_naturaleza_row(r: Any) -> str:
+    """Etiqueta humana para la tabla de movimientos de la cuenta activa."""
+    try:
+        gid = r.get("transfer_group_id")
+        if gid is not None and not (isinstance(gid, float) and pd.isna(gid)):
+            if str(gid).strip():
+                return "↔ Traspaso"
+        tag = str(r.get("transfer_tag") or "").strip().lower()
+        if "traspaso" in tag:
+            return "↔ Traspaso"
+        if str(r.get("tx_type") or "") == "egreso":
+            return "↓ Gasto"
+        return "↑ Ingreso"
+    except (AttributeError, TypeError):
+        return "—"
 
 
 def _bootstrap_account_result(ok: bool, wmsg: str | None) -> None:
@@ -1683,12 +1732,17 @@ def main() -> None:
             st.warning("No se pudieron cargar todos los saldos de una vez.")
             st.code(str(e))
         st.divider()
-        st.markdown("### Gráficos (cuenta del lateral)")
+        st.markdown("### Dashboard (cuenta del lateral)")
         try:
             render_finance_dashboard(
                 txs,
                 _dec(acc.get("opening_balance")),
                 str(acc.get("currency", "USD")),
+                sb=sb,
+                user_id=str(user["id"]),
+                account_id=str(account_id),
+                account_label=str(acc.get("label") or ""),
+                accounts=accounts,
             )
         except Exception as e:
             st.error("El tablero falló al cargar. Probá recargar la página o revisá los datos.")
@@ -1744,6 +1798,23 @@ def main() -> None:
         else:
             c4.metric("Saldo ≈ VES", "—", help="Elegí una tasa válida en la barra lateral.")
 
+        st.info(
+            "**Traspaso** = solo movés dinero de una **tuya** a otra (aunque cambie moneda: USD→USDT→VES). "
+            "**No es gasto** del mes en los reportes. **Egreso con rubro** = pagaste algo que **sale** de tu patrimonio "
+            "(comida, servicios…); eso **sí** es gasto."
+        )
+        with st.expander("Cómo registrar una cadena (ej. Zelle → Binance → bolívares → pagos)", expanded=False):
+            st.markdown(
+                """
+1. **Traspaso** Zelle (USD) → Binance (USDT): acá registrás el cambio de caja; elegí origen y destino y el monto que sale/entra.
+2. **Traspaso** Binance (USDT) → cuenta en **bolívares**: otro traspaso; usá tasa P2P si querés que la app calcule lo que entra en VES.
+3. **Egreso** solo cuando **pagás** algo desde la cuenta en bolívares: rubro (Comida, Servicios…). Ahí sí es “gasto”.
+
+En **Últimos movimientos** la columna **Naturaleza** te marca **↔ Traspaso**, **↓ Gasto** o **↑ Ingreso**.  
+Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
+                """
+            )
+
         t1, t2, t3 = st.tabs(["Registrar", "Saldo inicial", "Importar Excel"])
 
         with t1:
@@ -1753,14 +1824,21 @@ def main() -> None:
             )
 
             st.caption(
-                "**Ingreso / egreso:** indicá en qué **cuenta** queda el movimiento (Zelle, BofA, Binance, bolívares…). "
-                "No tenés que cambiar la cuenta del lateral solo para registrar; el listado de abajo sigue siendo la cuenta activa."
+                "**Elegí abajo el tipo** y completá un solo formulario. La **cuenta del lateral** solo filtra el listado de "
+                "movimientos de abajo; al registrar podés elegir **cualquier cuenta** en los selectores."
             )
-            tab_in, tab_out, tab_tr = st.tabs(
-                ["Ingreso (negocio u otros)", "Egreso (gastos)", "Traspaso entre cuentas"]
+            _mov_pick = st.radio(
+                "¿Qué querés registrar?",
+                [
+                    "Ingreso — me entró dinero (negocio u otros)",
+                    "Egreso — pagué un gasto (sale como consumo, con rubro)",
+                    "Traspaso — muevo entre mis cuentas (incluso si cambia moneda)",
+                ],
+                key="kf_mov_reg_kind",
+                horizontal=False,
             )
 
-            with tab_in:
+            if _mov_pick.startswith("Ingreso"):
                 cta_in = st.selectbox(
                     "Cuenta que **recibió** este ingreso",
                     _opt_keys,
@@ -1840,7 +1918,7 @@ def main() -> None:
                             st.error("No se pudo guardar.")
                             st.code(wmsg_tx or "")
 
-            with tab_out:
+            elif _mov_pick.startswith("Egreso"):
                 cta_out = st.selectbox(
                     "Cuenta de la que **sale** este gasto",
                     _opt_keys,
@@ -1920,7 +1998,7 @@ def main() -> None:
                             st.error("No se pudo guardar.")
                             st.code(wmsg_tx or "")
 
-            with tab_tr:
+            elif _mov_pick.startswith("Traspaso"):
                 st.caption(
                     "Genera **dos movimientos**: egreso en el origen e ingreso en el destino (ej. Zelle USD → Binance USDT por P2P). "
                     "Si las monedas son distintas, podés usar **Tasa P2P** (ej. Bs por USDT) para calcular lo que entra en el banco en bolívares. "
@@ -2169,16 +2247,27 @@ def main() -> None:
                 continue
             _by_gid_all.setdefault(_g, []).append(_t)
         _group_rows = [
-            _transfer_group_row(_g, _rows, opts) for _g, _rows in _by_gid_all.items() if _rows
+            _transfer_group_row(_g, _rows, opts, accounts)
+            for _g, _rows in _by_gid_all.items()
+            if _rows
         ]
         if _group_rows:
             _df_tr = pd.DataFrame(_group_rows).sort_values("fecha", ascending=False)
+            with st.expander("Vista en cadena (una línea por traspaso, con monedas)", expanded=True):
+                st.caption("Misma información que la tabla de abajo, en formato **origen (moneda) → destino (moneda)**.")
+                for gr in sorted(_group_rows, key=lambda x: str(x.get("fecha") or ""), reverse=True):
+                    st.markdown(
+                        f"- **{gr.get('fecha', '—')}** · `{gr.get('cadena_legible', '—')}` · "
+                        f"_{str(gr.get('descripcion') or '')[:72]}_ · grupo `{gr.get('grupo', '')}`"
+                    )
             _df_show = _df_tr[
                 [
                     "fecha",
                     "origen",
+                    "moneda_origen",
                     "egreso",
                     "destino",
+                    "moneda_destino",
                     "ingreso",
                     "diferencia",
                     "descripcion",
@@ -2193,6 +2282,20 @@ def main() -> None:
             )
             _df_show["diferencia"] = _df_show["diferencia"].map(
                 lambda x: "—" if pd.isna(x) else f"{float(x):+,.4f}"
+            )
+            _df_show = _df_show.rename(
+                columns={
+                    "fecha": "Fecha",
+                    "origen": "Origen",
+                    "moneda_origen": "Mon. origen",
+                    "egreso": "Egresa",
+                    "destino": "Destino",
+                    "moneda_destino": "Mon. destino",
+                    "ingreso": "Ingresa",
+                    "diferencia": "Diferencia",
+                    "descripcion": "Descripción",
+                    "grupo": "Grupo",
+                }
             )
             st.dataframe(_df_show, use_container_width=True, hide_index=True)
         else:
@@ -2209,8 +2312,8 @@ def main() -> None:
 
         st.subheader("Últimos movimientos (cuenta activa)")
         st.caption(
-            f"Aquí sí se listan solo los movimientos de la **cuenta activa**: "
-            f"**{acc.get('label', '—')}**."
+            f"Solo la cuenta del lateral: **{acc.get('label', '—')}**. Columna **Naturaleza**: "
+            f"↔ traspaso entre cuentas, ↓ gasto con rubro, ↑ ingreso."
         )
         if not txs:
             st.write("Todavía no hay movimientos.")
@@ -2237,6 +2340,7 @@ def main() -> None:
                 return str(opts.get(s, s))[:55]
 
             df["cuenta_relacionada"] = df["counterpart_account_id"].map(_contra_label)
+            df["naturaleza"] = df.apply(_tx_naturaleza_row, axis=1)
 
             def _gid_short_cell(x: Any) -> str:
                 if x is None or (isinstance(x, float) and pd.isna(x)):
@@ -2249,6 +2353,7 @@ def main() -> None:
             df["grupo_traspaso"] = df["transfer_group_id"].map(_gid_short_cell)
             show = df[
                 [
+                    "naturaleza",
                     "tx_date",
                     "tx_type",
                     "amount",
@@ -2269,6 +2374,23 @@ def main() -> None:
             )
             show["fee_amount"] = show["fee_amount"].apply(
                 lambda x: f"{float(x):,.6f}" if pd.notna(x) and x is not None and float(x) > 0 else "—"
+            )
+            show = show.rename(
+                columns={
+                    "naturaleza": "Naturaleza",
+                    "tx_date": "Fecha",
+                    "tx_type": "Tipo",
+                    "amount": "Monto",
+                    "fee_amount": "Comisión",
+                    "business": "Negocio",
+                    "category": "Rubro",
+                    "transfer_tag": "Etiqueta",
+                    "grupo_traspaso": "Grupo traspaso",
+                    "cuenta_relacionada": "Cuenta relacionada",
+                    "description": "Descripción",
+                    "registró": "Registró",
+                    "id": "id",
+                }
             )
             st.dataframe(show, use_container_width=True, hide_index=True)
 
