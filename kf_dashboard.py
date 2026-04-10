@@ -105,6 +105,92 @@ def _recent_month_keys(n: int, anchor: date) -> list[str]:
     return out
 
 
+def _chart_bounds(
+    d0: date | None,
+    d1: date | None,
+    dff_flow: pd.DataFrame,
+    df: pd.DataFrame,
+) -> tuple[date | None, date | None]:
+    """Rango de fechas para rellenar meses/años (incluso con ceros)."""
+    if d0 is not None and d1 is not None:
+        return d0, d1
+    if len(dff_flow):
+        return (
+            pd.Timestamp(dff_flow["tx_date"].min()).date(),
+            pd.Timestamp(dff_flow["tx_date"].max()).date(),
+        )
+    if len(df):
+        return (
+            pd.Timestamp(df["tx_date"].min()).date(),
+            pd.Timestamp(df["tx_date"].max()).date(),
+        )
+    return None, None
+
+
+def _expand_monthly_table(
+    monthly: pd.DataFrame,
+    cb0: date,
+    cb1: date,
+) -> pd.DataFrame:
+    """Todos los meses calendario entre cb0 y cb1 con ingreso/egreso (0 si no hubo flujo)."""
+    p0 = pd.Timestamp(cb0).to_period("M")
+    p1 = pd.Timestamp(cb1).to_period("M")
+    pr = pd.period_range(p0, p1, freq="M")
+    full = pd.DataFrame({"ym": pr.astype(str)})
+    if len(monthly) and "ym" in monthly.columns:
+        cols = [c for c in ("ym", "ingreso", "egreso") if c in monthly.columns]
+        full = full.merge(monthly[cols], on="ym", how="left")
+    if "ingreso" not in full.columns:
+        full["ingreso"] = 0.0
+        full["egreso"] = 0.0
+    full["ingreso"] = full["ingreso"].fillna(0.0)
+    full["egreso"] = full["egreso"].fillna(0.0)
+    full["neto"] = full["ingreso"] - full["egreso"]
+    _meses = (
+        "ene",
+        "feb",
+        "mar",
+        "abr",
+        "may",
+        "jun",
+        "jul",
+        "ago",
+        "sep",
+        "oct",
+        "nov",
+        "dic",
+    )
+
+    def _lbl(ym: str) -> str:
+        try:
+            y, m = ym.split("-")
+            return f"{_meses[int(m) - 1]} {y}"
+        except (ValueError, IndexError):
+            return ym
+
+    full["Mes"] = full["ym"].map(_lbl)
+    return full
+
+
+def _expand_yearly_table(
+    yearly: pd.DataFrame,
+    cb0: date,
+    cb1: date,
+) -> pd.DataFrame:
+    years = [str(y) for y in range(cb0.year, cb1.year + 1)]
+    full = pd.DataFrame({"yr": years})
+    if len(yearly) and "yr" in yearly.columns:
+        cols = [c for c in ("yr", "ingreso", "egreso") if c in yearly.columns]
+        full = full.merge(yearly[cols], on="yr", how="left")
+    if "ingreso" not in full.columns:
+        full["ingreso"] = 0.0
+        full["egreso"] = 0.0
+    full["ingreso"] = full["ingreso"].fillna(0.0)
+    full["egreso"] = full["egreso"].fillna(0.0)
+    full["neto"] = full["ingreso"] - full["egreso"]
+    return full
+
+
 def _budget_status_emoji(pct: float) -> str:
     if pct < 0.8:
         return "🟢"
@@ -498,34 +584,50 @@ def render_finance_dashboard(
 
     st.divider()
 
-    if dff_flow.empty:
-        st.info("No hay movimientos de flujo en el período elegido para graficar.")
+    cb0, cb1 = _chart_bounds(d0, d1, dff_flow, df)
+    if cb0 is None or cb1 is None:
+        st.info("No hay movimientos registrados en esta cuenta para graficar.")
         return
 
-    dff_flow = dff_flow.sort_values("tx_date")
-    dff_flow["ing"] = dff_flow.apply(
-        lambda r: float(r["amount"]) if r["tx_type"] == "ingreso" else 0.0, axis=1
-    )
-    dff_flow["egr"] = dff_flow.apply(
-        lambda r: float(r["amount"]) if r["tx_type"] == "egreso" else 0.0, axis=1
-    )
+    if dff_flow.empty:
+        st.caption(
+            "**Sin ingresos ni egresos de flujo** en el período (puede ser que solo registraste **traspasos** "
+            "con «excluir traspasos» activo, o que no hubo movimientos). "
+            "Igual ves **cada mes del rango** con **0** para ubicarte en el calendario."
+        )
 
-    daily = dff_flow.groupby("tx_date", as_index=False).agg(
-        ingreso=("ing", "sum"), egreso=("egr", "sum")
-    )
-    daily["neto"] = daily["ingreso"] - daily["egreso"]
+    if len(dff_flow):
+        dff_flow = dff_flow.sort_values("tx_date")
+        dff_flow["ing"] = dff_flow.apply(
+            lambda r: float(r["amount"]) if r["tx_type"] == "ingreso" else 0.0, axis=1
+        )
+        dff_flow["egr"] = dff_flow.apply(
+            lambda r: float(r["amount"]) if r["tx_type"] == "egreso" else 0.0, axis=1
+        )
 
-    dff_flow["ym"] = pd.to_datetime(dff_flow["tx_date"]).dt.to_period("M").astype(str)
-    monthly = dff_flow.groupby("ym", as_index=False).agg(
-        ingreso=("ing", "sum"), egreso=("egr", "sum")
-    )
-    monthly["neto"] = monthly["ingreso"] - monthly["egreso"]
+        daily = dff_flow.groupby("tx_date", as_index=False).agg(
+            ingreso=("ing", "sum"), egreso=("egr", "sum")
+        )
+        daily["neto"] = daily["ingreso"] - daily["egreso"]
 
-    dff_flow["yr"] = pd.to_datetime(dff_flow["tx_date"]).dt.year.astype(str)
-    yearly = dff_flow.groupby("yr", as_index=False).agg(
-        ingreso=("ing", "sum"), egreso=("egr", "sum")
-    )
-    yearly["neto"] = yearly["ingreso"] - yearly["egreso"]
+        dff_flow["ym"] = pd.to_datetime(dff_flow["tx_date"]).dt.to_period("M").astype(str)
+        monthly = dff_flow.groupby("ym", as_index=False).agg(
+            ingreso=("ing", "sum"), egreso=("egr", "sum")
+        )
+        monthly["neto"] = monthly["ingreso"] - monthly["egreso"]
+
+        dff_flow["yr"] = pd.to_datetime(dff_flow["tx_date"]).dt.year.astype(str)
+        yearly = dff_flow.groupby("yr", as_index=False).agg(
+            ingreso=("ing", "sum"), egreso=("egr", "sum")
+        )
+        yearly["neto"] = yearly["ingreso"] - yearly["egreso"]
+    else:
+        daily = pd.DataFrame(columns=["tx_date", "ingreso", "egreso", "neto"])
+        monthly = pd.DataFrame(columns=["ym", "ingreso", "egreso", "neto"])
+        yearly = pd.DataFrame(columns=["yr", "ingreso", "egreso", "neto"])
+
+    monthly_full = _expand_monthly_table(monthly, cb0, cb1)
+    yearly_full = _expand_yearly_table(yearly, cb0, cb1)
 
     tab_met, tab_sum, tab_d, tab_m, tab_y, tab_neg, tab_cat = st.tabs(
         [
@@ -711,63 +813,120 @@ def render_finance_dashboard(
                 )
 
     with tab_d:
-        fig_d = go.Figure()
-        fig_d.add_trace(
-            go.Bar(x=daily["tx_date"], y=daily["ingreso"], name="Ingresos", marker_color="#22c55e")
-        )
-        fig_d.add_trace(
-            go.Bar(x=daily["tx_date"], y=daily["egreso"], name="Egresos", marker_color="#f97316")
-        )
-        fig_d.update_layout(
-            **layout,
-            title="Flujo por día",
-            barmode="group",
-            xaxis=dict(title="Fecha", **_axis_style),
-            yaxis=dict(title=currency, **_axis_style),
-        )
-        st.plotly_chart(fig_d, use_container_width=True)
-
-        fig_line = go.Figure()
-        fig_line.add_trace(
-            go.Scatter(
-                x=daily["tx_date"],
-                y=daily["neto"].cumsum(),
-                fill="tozeroy",
-                name="Neto acumulado",
-                line=dict(color="#2563eb", width=2),
-                fillcolor="rgba(37, 99, 235, 0.12)",
+        if len(daily):
+            fig_d = go.Figure()
+            fig_d.add_trace(
+                go.Bar(
+                    x=daily["tx_date"],
+                    y=daily["ingreso"],
+                    name="Ingresos",
+                    marker_color="#22c55e",
+                )
             )
-        )
-        fig_line.update_layout(
-            **layout,
-            title="Neto acumulado en el período",
-            xaxis=dict(**_axis_style),
-            yaxis=dict(title=currency, **_axis_style),
-        )
-        st.plotly_chart(fig_line, use_container_width=True)
+            fig_d.add_trace(
+                go.Bar(
+                    x=daily["tx_date"],
+                    y=daily["egreso"],
+                    name="Egresos",
+                    marker_color="#f97316",
+                )
+            )
+            fig_d.update_layout(
+                **layout,
+                title="Flujo por día",
+                barmode="group",
+                xaxis=dict(title="Fecha", **_axis_style),
+                yaxis=dict(title=currency, **_axis_style),
+            )
+            st.plotly_chart(fig_d, use_container_width=True)
+
+            fig_line = go.Figure()
+            fig_line.add_trace(
+                go.Scatter(
+                    x=daily["tx_date"],
+                    y=daily["neto"].cumsum(),
+                    fill="tozeroy",
+                    name="Neto acumulado",
+                    line=dict(color="#2563eb", width=2),
+                    fillcolor="rgba(37, 99, 235, 0.12)",
+                )
+            )
+            fig_line.update_layout(
+                **layout,
+                title="Neto acumulado en el período",
+                xaxis=dict(**_axis_style),
+                yaxis=dict(title=currency, **_axis_style),
+            )
+            st.plotly_chart(fig_line, use_container_width=True)
+        else:
+            st.info(
+                "No hay **flujo diario** que mostrar (sin ingresos/egresos en el período, o solo traspasos excluidos). "
+                f"Probá el tab **Mensual**: ahí figuran los meses **{cb0}** → **{cb1}** aunque estén en cero."
+            )
 
     with tab_m:
+        st.caption(
+            f"Rango del gráfico: **{cb0}** → **{cb1}** · moneda **{currency}** · "
+            "cada barra es un **mes calendario** (meses sin movimientos = **0**)."
+        )
         fig_m = go.Figure()
         fig_m.add_trace(
-            go.Bar(x=monthly["ym"], y=monthly["ingreso"], name="Ingresos", marker_color="#22c55e")
+            go.Bar(
+                x=monthly_full["Mes"],
+                y=monthly_full["ingreso"],
+                name="Ingresos",
+                marker_color="#22c55e",
+            )
         )
         fig_m.add_trace(
-            go.Bar(x=monthly["ym"], y=monthly["egreso"], name="Egresos", marker_color="#f97316")
+            go.Bar(
+                x=monthly_full["Mes"],
+                y=monthly_full["egreso"],
+                name="Egresos",
+                marker_color="#f97316",
+            )
         )
         fig_m.update_layout(
             **layout,
-            title="Por mes",
+            title="Por mes (desglose completo del período)",
             barmode="group",
             xaxis=dict(**_axis_style),
             yaxis=dict(title=currency, **_axis_style),
         )
         st.plotly_chart(fig_m, use_container_width=True)
+        st.markdown("**Tabla mes a mes** (mismos totales que las barras)")
+        st.dataframe(
+            monthly_full.rename(
+                columns={
+                    "ym": "Año-mes",
+                    "Mes": "Mes",
+                    "ingreso": "Ingresos",
+                    "egreso": "Egresos",
+                    "neto": "Neto",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     with tab_y:
+        st.caption(
+            f"Años que cruzan **{cb0}** → **{cb1}** (si solo cae un año, verás una sola barra)."
+        )
         fig_y = go.Figure(
             data=[
-                go.Bar(name="Ingresos", x=yearly["yr"], y=yearly["ingreso"], marker_color="#22c55e"),
-                go.Bar(name="Egresos", x=yearly["yr"], y=yearly["egreso"], marker_color="#ef4444"),
+                go.Bar(
+                    name="Ingresos",
+                    x=yearly_full["yr"],
+                    y=yearly_full["ingreso"],
+                    marker_color="#22c55e",
+                ),
+                go.Bar(
+                    name="Egresos",
+                    x=yearly_full["yr"],
+                    y=yearly_full["egreso"],
+                    marker_color="#ef4444",
+                ),
             ]
         )
         fig_y.update_layout(
@@ -778,6 +937,18 @@ def render_finance_dashboard(
             yaxis=dict(title=currency, **_axis_style),
         )
         st.plotly_chart(fig_y, use_container_width=True)
+        st.dataframe(
+            yearly_full.rename(
+                columns={
+                    "yr": "Año",
+                    "ingreso": "Ingresos",
+                    "egreso": "Egresos",
+                    "neto": "Neto",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     with tab_neg:
         ing_df = dff_flow[dff_flow["tx_type"] == "ingreso"].copy()
