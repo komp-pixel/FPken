@@ -443,6 +443,23 @@ def _reports_plotly_layout() -> tuple[dict[str, Any], dict[str, Any]]:
     return layout, axis_style
 
 
+def _reports_pie_layout(title: str) -> dict[str, Any]:
+    """Layout solo para Pie: sin plot_bgcolor ni ** sobre dict compartido (evita TypeError en Plotly 6+)."""
+    dark = is_dark_theme()
+    return {
+        "template": "plotly_dark" if dark else "plotly_white",
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "font": {
+            "color": "#e2e8f0" if dark else "#334155",
+            "family": "system-ui, -apple-system, sans-serif",
+            "size": 12,
+        },
+        "margin": {"l": 32, "r": 32, "t": 56, "b": 32},
+        "showlegend": False,
+        "title": {"text": title, "x": 0.5, "xanchor": "center"},
+    }
+
+
 def _pie_top_n(labels_values: list[tuple[str, float]], top_n: int = 8) -> tuple[list[str], list[float]]:
     items = [(str(l), float(v)) for l, v in labels_values if float(v) > 0]
     items.sort(key=lambda x: -x[1])
@@ -1048,16 +1065,12 @@ def render_reports_page(
                                 values=vals_e,
                                 hole=0.45,
                                 textinfo="percent+label",
-                                textposition="auto",
+                                textposition="outside",
                                 marker=dict(colors=_cycle_colors(len(labels_e))),
                             )
                         ]
                     )
-                    fig_e.update_layout(
-                        **layout_p,
-                        title=f"Egresos por rubro · {cur}",
-                        showlegend=False,
-                    )
+                    fig_e.update_layout(**_reports_pie_layout(f"Egresos por rubro · {cur}"))
                     st.plotly_chart(fig_e, use_container_width=True)
                 else:
                     st.caption("Sin egresos con rubro.")
@@ -1071,16 +1084,12 @@ def render_reports_page(
                                 values=vals_i,
                                 hole=0.45,
                                 textinfo="percent+label",
-                                textposition="auto",
+                                textposition="outside",
                                 marker=dict(colors=_cycle_colors(len(labels_i))),
                             )
                         ]
                     )
-                    fig_i.update_layout(
-                        **layout_p,
-                        title=f"Ingresos por negocio · {cur}",
-                        showlegend=False,
-                    )
+                    fig_i.update_layout(**_reports_pie_layout(f"Ingresos por negocio · {cur}"))
                     st.plotly_chart(fig_i, use_container_width=True)
                 else:
                     st.caption("Sin ingresos con negocio.")
