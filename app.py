@@ -1391,19 +1391,21 @@ def _render_balances_ves_lk_cards(rows: list[dict[str, Any]]) -> None:
 
 
 def _pick_account_id_sidebar(opts: dict[str, str]) -> str:
+    """Usar dentro de `st.sidebar` (p. ej. dentro de un expander); usa `st.*` para anidar bien."""
     keys = list(opts.keys())
     if not keys:
         return ""
     if len(keys) == 1:
+        st.caption(f"📌 Una sola cuenta: **{opts[keys[0]]}**")
         return keys[0]
     if (
         st.session_state.get("kf_sidebar_account") is None
         or st.session_state.get("kf_sidebar_account") not in opts
     ):
         st.session_state.kf_sidebar_account = keys[0]
-    st.sidebar.caption("Atajos · misma lista que «Cuenta activa»")
+    st.caption("⚡ Atajos · misma cuenta que el selector")
     for row_start in range(0, len(keys), 2):
-        c_a, c_b = st.sidebar.columns(2)
+        c_a, c_b = st.columns(2)
         with c_a:
             k = keys[row_start]
             lab = str(opts[k])
@@ -1430,12 +1432,12 @@ def _pick_account_id_sidebar(opts: dict[str, str]) -> str:
                     st.session_state.kf_sidebar_account = k2
                     st.rerun()
     return str(
-        st.sidebar.selectbox(
-            "Cuenta para movimientos y registro",
+        st.selectbox(
+            "🏦 Cuenta para movimientos y registro",
             options=keys,
             format_func=lambda x: opts[x],
             key="kf_sidebar_account",
-            help="Listado y formularios de **Movimientos** usan esta cuenta por defecto; el panorama y saldos arriba son de **todas**.",
+            help="**Movimientos** y registro por defecto. Panorama y saldos del Dashboard usan todas las cuentas.",
         )
     )
 
@@ -1519,13 +1521,8 @@ def main() -> None:
     account_owner_id = str(user["id"])
 
     with st.sidebar:
-        render_theme_picker_sidebar()
-        st.divider()
-        st.markdown(f"**{user['display_name']}**  \n`{user['username']}`")
-        if st.button("Cerrar sesión", type="primary", use_container_width=True):
-            logout()
-            st.rerun()
-        st.divider()
+        st.markdown("##### 💰 Kenny Finanzas")
+        st.caption(f"👤 **{user['display_name']}** · `{user['username']}`")
         if user.get("is_admin"):
             try:
                 _urows = load_users_active(sb)
@@ -1543,33 +1540,13 @@ def main() -> None:
                         str(user["id"]) if str(user["id"]) in _ids else _ids[0]
                     )
                 account_owner_id = st.selectbox(
-                    "Cuentas de (usuario)",
+                    "👥 Cuentas de (usuario)",
                     _ids,
                     format_func=lambda i: _labels.get(i, i),
                     key=_ss_acc,
-                    help="Elegí quién es el dueño de las cuentas que ves y creás. "
-                    "Para cargar cuentas de Sebas, tiene que figurar Sebas aquí (no tu usuario admin). "
-                    "Cada usuario solo ve las suyas al iniciar sesión.",
+                    help="Dueño de las cuentas que ves y creás. Cada usuario solo ve las suyas al iniciar sesión.",
                 )
-        st.caption(
-            "Pestañas: **Dashboard · Movimientos · Cuentas · Reportes · Usuarios** (área principal)."
-        )
-        with st.expander("¿No ves una cuenta que acabas de crear?", expanded=False):
-            st.caption(
-                "El listado solo muestra cuentas con **propietario** igual a tu usuario. "
-                "Si la fila quedó sin dueño en la base, tocá reparar."
-            )
-            if st.button(
-                "Asignar cuentas sin propietario a mi usuario",
-                key="kf_sidebar_claim_owner",
-                help="Solo filas con propietario vacío; las asocia al usuario activo (el del lateral).",
-            ):
-                nfix_sb = claim_unowned_accounts(sb, str(account_owner_id))
-                if nfix_sb > 0:
-                    st.success(f"Listo: {nfix_sb} cuenta(s).")
-                    st.rerun()
-                else:
-                    st.caption("No hay cuentas huérfanas para reparar.")
+        st.divider()
 
     try:
         accounts = load_accounts(sb, str(account_owner_id))
@@ -1742,42 +1719,69 @@ def main() -> None:
         f'{ACCOUNT_KIND_LABELS.get(_infer_account_kind(a), "?")}'
         for a in accounts
     }
-    account_id = _pick_account_id_sidebar(opts)
+    with st.sidebar:
+        with st.expander("🏦 Cuentas", expanded=True):
+            account_id = _pick_account_id_sidebar(opts)
 
-    st.sidebar.divider()
-    st.sidebar.subheader("Tasa (bolívares)")
-    _fx_choices: list[tuple[str, str]] = [
-        ("BCV oficial (promedio)", "bcv"),
-        ("P2P — comprar USDT (mediana)", "p2p_buy"),
-        ("P2P — vender USDT (mediana)", "p2p_sell"),
-        ("Manual: Bs × 1 USD o USDT", "manual"),
-    ]
-    _fx_labels = [t[0] for t in _fx_choices]
-    _fx_pick = st.sidebar.selectbox(
-        "Convertir USD / USDT a VES con",
-        _fx_labels,
-        key="kf_fx_mode_label",
-        help="Una misma tasa aplica a USD y USDT como referencia; VES queda en Bs. "
-        "El desglose por cuenta está en Dashboard.",
-    )
-    _fx_mode = dict(_fx_choices)[_fx_pick]
-    _manual_bs: float | None = None
-    if _fx_mode == "manual":
-        _manual_bs = float(
-            st.sidebar.number_input(
-                "Bs por 1 USD o USDT",
-                min_value=0.0001,
-                value=400.0,
-                format="%.4f",
-                key="kf_fx_manual_bs",
+        with st.expander("📊 Informes y referencias", expanded=False):
+            st.caption("Pestaña **Reportes** → PDF, CSV, comparación y gráficos.")
+            st.caption("**Dashboard** → saldos ≈ VES según la tasa de abajo.")
+            st.markdown("**💱 Tasa (bolívares)**")
+            _fx_choices: list[tuple[str, str]] = [
+                ("BCV oficial (promedio)", "bcv"),
+                ("P2P — comprar USDT (mediana)", "p2p_buy"),
+                ("P2P — vender USDT (mediana)", "p2p_sell"),
+                ("Manual: Bs × 1 USD o USDT", "manual"),
+            ]
+            _fx_labels = [t[0] for t in _fx_choices]
+            _fx_pick = st.selectbox(
+                "Convertir USD / USDT a VES con",
+                _fx_labels,
+                key="kf_fx_mode_label",
+                help="Referencia para columnas VES en Dashboard. No mezcla monedas en movimientos.",
             )
-        )
-    _ves_u, _ves_t, _fx_caption = resolve_ves_rates(_fx_mode, _manual_bs)
-    st.sidebar.caption(_fx_caption)
-    if _ves_u is None or _ves_t is None:
-        st.sidebar.warning("No hay tasa válida; revisá la opción o la red.")
-    else:
-        st.sidebar.caption("Tabla de saldos en VES: **Dashboard**.")
+            _fx_mode = dict(_fx_choices)[_fx_pick]
+            _manual_bs: float | None = None
+            if _fx_mode == "manual":
+                _manual_bs = float(
+                    st.number_input(
+                        "Bs por 1 USD o USDT",
+                        min_value=0.0001,
+                        value=400.0,
+                        format="%.4f",
+                        key="kf_fx_manual_bs",
+                    )
+                )
+            _ves_u, _ves_t, _fx_caption = resolve_ves_rates(_fx_mode, _manual_bs)
+            st.caption(_fx_caption)
+            if _ves_u is None or _ves_t is None:
+                st.warning("No hay tasa válida; revisá la opción o la red.")
+            else:
+                st.caption("Activá desglose VES en **Dashboard** si querés totales.")
+
+        with st.expander("🔧 Herramientas", expanded=False):
+            render_theme_picker_sidebar()
+            st.divider()
+            st.caption("**Navegación:** Dashboard · Movimientos · Cuentas · Reportes · Usuarios")
+            with st.expander("🛠 Cuentas sin propietario", expanded=False):
+                st.caption(
+                    "Si creaste una cuenta y no aparece, puede faltar **owner** en la base."
+                )
+                if st.button(
+                    "Asignar huérfanas a mi usuario",
+                    key="kf_sidebar_claim_owner",
+                    help="Solo filas con propietario vacío.",
+                ):
+                    nfix_sb = claim_unowned_accounts(sb, str(account_owner_id))
+                    if nfix_sb > 0:
+                        st.success(f"Listo: {nfix_sb} cuenta(s).")
+                        st.rerun()
+                    else:
+                        st.caption("No hay cuentas huérfanas.")
+            st.divider()
+            if st.button("🚪 Cerrar sesión", type="primary", use_container_width=True):
+                logout()
+                st.rerun()
 
     acc = next(a for a in accounts if str(a["id"]) == str(account_id))
     txs = load_transactions(sb, account_id)
@@ -1789,8 +1793,8 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     st.caption(
-        "Vista centrada en **todas tus cuentas**: panorama, saldos y patrimonio. "
-        "En el lateral: **cuenta para movimientos** = donde registrás y ves el listado detallado."
+        "Panorama y saldos de **todas** las cuentas en **Dashboard**. "
+        "En el lateral → **Cuentas** elegís la cuenta del **listado y registro** en Movimientos."
     )
 
     tab_dash, tab_mov, tab_acc, tab_rep, tab_usr = st.tabs(
@@ -1906,11 +1910,11 @@ Así el **panorama** te muestra **de qué negocio entra** el dinero y **dónde l
         else:
             c4.metric("Saldo ≈ VES", "—", help="Elegí una tasa válida en la barra lateral.")
 
-        st.info(
-            "**Traspaso** = solo movés dinero de una **tuya** a otra (aunque cambie moneda: USD→USDT→VES). "
-            "**No es gasto** del mes en los reportes. **Egreso con rubro** = pagaste algo que **sale** de tu patrimonio "
-            "(comida, servicios…); eso **sí** es gasto."
-        )
+        with st.expander("ℹ️ Traspaso vs gasto (tocá para leer)", expanded=False):
+            st.markdown(
+                "**Traspaso** = movés entre **tus** cuentas (USD→USDT→VES). **No cuenta como gasto** del mes.  \n"
+                "**Egreso con rubro** = pagaste algo que **sale** de tu patrimonio (comida, servicios…); **sí es gasto**."
+            )
         with st.expander("Cómo registrar una cadena (ej. Zelle → Binance → bolívares → pagos)", expanded=False):
             st.markdown(
                 """
@@ -2422,12 +2426,12 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
             )
 
         st.markdown(
-            '<p class="lk-section" style="margin-top:0;">Últimos movimientos (cuenta activa)</p>',
+            '<p class="lk-section" style="margin-top:0;">📋 Movimientos de la cuenta</p>',
             unsafe_allow_html=True,
         )
         st.caption(
-            f"Solo la cuenta del lateral: **{acc.get('label', '—')}**. Columna **Naturaleza**: "
-            f"↔ traspaso entre cuentas, ↓ gasto con rubro, ↑ ingreso."
+            f"**{acc.get('label', '—')}** · **Naturaleza:** ↔ traspaso · ↓ gasto · ↑ ingreso · "
+            "Orden **fecha reciente primero**. Podés ordenar columnas desde el encabezado."
         )
         if not txs:
             st.write("Todavía no hay movimientos.")
@@ -2467,16 +2471,16 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
             df["grupo_traspaso"] = df["transfer_group_id"].map(_gid_short_cell)
             show = df[
                 [
-                    "naturaleza",
                     "tx_date",
+                    "naturaleza",
                     "tx_type",
                     "amount",
-                    "fee_amount",
                     "business",
                     "category",
+                    "cuenta_relacionada",
+                    "fee_amount",
                     "transfer_tag",
                     "grupo_traspaso",
-                    "cuenta_relacionada",
                     "description",
                     "registró",
                     "id",
@@ -2491,22 +2495,49 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
             )
             show = show.rename(
                 columns={
-                    "naturaleza": "Naturaleza",
                     "tx_date": "Fecha",
+                    "naturaleza": "Naturaleza",
                     "tx_type": "Tipo",
                     "amount": "Monto",
-                    "fee_amount": "Comisión",
                     "business": "Negocio",
                     "category": "Rubro",
+                    "cuenta_relacionada": "Contraparte",
+                    "fee_amount": "Comisión",
                     "transfer_tag": "Etiqueta",
-                    "grupo_traspaso": "Grupo traspaso",
-                    "cuenta_relacionada": "Cuenta relacionada",
+                    "grupo_traspaso": "Grupo",
                     "description": "Descripción",
                     "registró": "Registró",
-                    "id": "id",
+                    "id": "ID",
                 }
             )
-            st.dataframe(show, use_container_width=True, hide_index=True)
+            _nrows = len(show)
+            _mov_h = min(580, max(220, 36 * _nrows + 52))
+            _mov_col_cfg: dict[str, Any] = {
+                "Fecha": st.column_config.TextColumn("Fecha", width="small"),
+                "Naturaleza": st.column_config.TextColumn("Nat.", width="small"),
+                "Tipo": st.column_config.TextColumn("Tipo", width="small"),
+                "Monto": st.column_config.TextColumn("Monto", width="small"),
+                "Negocio": st.column_config.TextColumn("Negocio", width="medium"),
+                "Rubro": st.column_config.TextColumn("Rubro", width="medium"),
+                "Contraparte": st.column_config.TextColumn("Contraparte", width="medium"),
+                "Comisión": st.column_config.TextColumn("Comis.", width="small"),
+                "Etiqueta": st.column_config.TextColumn("Etiqueta", width="small"),
+                "Grupo": st.column_config.TextColumn("Grupo", width="small"),
+                "Descripción": st.column_config.TextColumn("Descripción", width="large"),
+                "Registró": st.column_config.TextColumn("Registró", width="small"),
+                "ID": st.column_config.TextColumn(
+                    "ID",
+                    width="small",
+                    help="UUID — usar abajo en «Eliminar por UUID»",
+                ),
+            }
+            st.dataframe(
+                show,
+                use_container_width=True,
+                hide_index=True,
+                height=_mov_h,
+                column_config=_mov_col_cfg,
+            )
 
             _opt_keys_ed = list(opts.keys())
             with st.expander("Editar movimiento", expanded=False):
