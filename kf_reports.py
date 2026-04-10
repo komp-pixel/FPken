@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from io import BytesIO
 from typing import Any
 
@@ -13,6 +14,100 @@ import streamlit as st
 from supabase import Client
 
 from kf_theme import is_dark_theme
+
+# Tablas largas: filas visibles antes de abrir el expander con el resto.
+_REPORT_PREVIEW_11 = 8
+_REPORT_PREVIEW_DETAIL = 25
+_REPORT_PREVIEW_TRANSFER = 14
+
+
+def _parse_to_date(v: Any) -> date | None:
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    ts = pd.to_datetime(s, errors="coerce")
+    if pd.isna(ts):
+        return None
+    return ts.date()
+
+
+def _fmt_date_es(v: Any) -> str:
+    """Fecha visible DD/MM/AAAA (UI, tablas, PDF)."""
+    d = _parse_to_date(v)
+    return d.strftime("%d/%m/%Y") if d else ""
+
+
+def _periodo_txt(d0: date, d1: date) -> str:
+    return f"del {_fmt_date_es(d0)} al {_fmt_date_es(d1)}"
+
+
+def _filename_date(d: date) -> str:
+    """Nombre de archivo sin barras."""
+    return d.strftime("%d-%m-%Y")
+
+
+def _st_df_preview(
+    df: pd.DataFrame,
+    preview_n: int,
+    expander_label: str,
+) -> None:
+    if df.empty:
+        return
+    if len(df) <= preview_n:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        return
+    st.caption(
+        f"Mostrando los **{preview_n}** primeros ítems; el resto en «{expander_label}» o en **CSV/PDF**."
+    )
+    st.dataframe(df.head(preview_n), use_container_width=True, hide_index=True)
+    with st.expander(expander_label, expanded=False):
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def _brief_period_summary(
+    d0: date,
+    d1: date,
+    by_cur: dict[str, dict[str, float]],
+    by_cur_bal: dict[str, float],
+    n_transfer: int,
+    exclude_transfers: bool,
+) -> list[str]:
+    """Pocas líneas, montos con 2 decimales; fechas ya en español."""
+    lines: list[str] = [f"Período **{_periodo_txt(d0, d1)}**."]
+    has_flow = any(
+        float(s.get("ing", 0)) > 0 or float(s.get("egr", 0)) > 0 for s in by_cur.values()
+    )
+    if not has_flow:
+        lines.append(
+            "En este rango no hay ingresos ni egresos de **flujo** (o todo fueron traspasos excluidos)."
+        )
+    else:
+        for cur, s in sorted(by_cur.items()):
+            ing, egr = float(s.get("ing", 0)), float(s.get("egr", 0))
+            if ing == 0 and egr == 0:
+                continue
+            net = ing - egr
+            lines.append(
+                f"**{cur}:** entró **{ing:,.2f}** · salió **{egr:,.2f}** · **neto {net:,.2f}**."
+            )
+    if by_cur_bal:
+        parts = [f"**{c}** {v:,.2f}" for c, v in sorted(by_cur_bal.items())]
+        lines.append(
+            f"Suma de saldos al **{_fmt_date_es(d1)}:** " + " · ".join(parts) + " (sin convertir monedas)."
+        )
+    if n_transfer:
+        suf = " (excluidos del flujo de negocio)." if exclude_transfers else "."
+        lines.append(f"**{n_transfer}** movimiento(s) de traspaso entre cuentas{suf}")
+    lines.append(
+        "Las tablas muestran un **vista corta**; el detalle completo está en los expanders o en **CSV / PDF**."
+    )
+    return lines
 
 
 def load_tx_date_range(
@@ -29,6 +124,134 @@ def load_tx_date_range(
     )
     r = q.order("tx_date", desc=True).limit(8000).execute()
     return list(r.data or [])
+
+
+def load_txs_until_date(
+    sb: Client, account_ids: list[str], d_end: date, limit: int = 12000
+) -> list[dict[str, Any]]:
+    """Todos los movimientos con fecha ≤ d_end (para saldo al cierre del período)."""
+    if not account_ids:
+        return []
+    r = (
+        sb.table("kf_transaction")
+        .select("*")
+        .in_("account_id", account_ids)
+        .lte("tx_date", d_end.isoformat())
+        .order("tx_date", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return list(r.data or [])
+
+
+def _dec_rep(x: Any) -> Decimal:
+    if x is None:
+        return Decimal("0")
+    return Decimal(str(x))
+
+
+def compute_balance_for_report(account: dict[str, Any], txs: list[dict[str, Any]]) -> float:
+    """Saldo = saldo inicial registrado + ingresos − egresos (misma lógica que Movimientos)."""
+    base = _dec_rep(account.get("opening_balance"))
+    for t in txs:
+        amt = _dec_rep(t.get("amount"))
+        if str(t.get("tx_type")) == "ingreso":
+            base += amt
+        else:
+            base -= amt
+    return float(base)
+
+
+def _report_balance_rows(
+    sel: list[str],
+    amap: dict[str, dict[str, Any]],
+    txs_until: list[dict[str, Any]],
+    d1: date,
+) -> tuple[list[dict[str, Any]], list[list[str]], dict[str, float]]:
+    """Filas para UI, filas para PDF, suma de saldos por moneda (no convierte entre monedas)."""
+    ui: list[dict[str, Any]] = []
+    pdf: list[list[str]] = []
+    by_cur: dict[str, float] = defaultdict(float)
+    for aid in sel:
+        acc = amap.get(str(aid), {})
+        lab = str(acc.get("label", aid[:8]))
+        cur = str(acc.get("currency", "?"))
+        txs_acc = [t for t in txs_until if str(t.get("account_id")) == str(aid)]
+        bal = compute_balance_for_report(acc, txs_acc)
+        by_cur[cur] += bal
+        ui.append(
+            {
+                "Cuenta": lab,
+                "Moneda": cur,
+                f"Saldo al {_fmt_date_es(d1)}": round(bal, 2),
+                "Mov. en cálculo": len(txs_acc),
+            }
+        )
+        pdf.append([lab[:28], cur, f"{bal:,.2f}", str(len(txs_acc))])
+    return ui, pdf, dict(by_cur)
+
+
+def _report_recommendations(
+    *,
+    by_cur: dict[str, dict[str, float]],
+    dh: list[dict[str, Any]] | None,
+    n_transfer: int,
+    exclude_transfers: bool,
+    by_cur_bal: dict[str, float],
+) -> list[str]:
+    tips: list[str] = []
+    if n_transfer > 0 and exclude_transfers:
+        tips.append(
+            f"En el período hay **{n_transfer}** línea(s) de **traspaso**. No cuentan como ingreso de negocio ni gasto: "
+            "revisá la **sección 2** y los **saldos por cuenta** para ver en qué cuenta quedó cada monto."
+        )
+    for cur, s in sorted(by_cur.items()):
+        ing, egr = float(s.get("ing", 0)), float(s.get("egr", 0))
+        net = ing - egr
+        if ing > 0 or egr > 0:
+            if net < 0:
+                tips.append(
+                    f"**{cur}:** en el período el flujo **sin traspasos** quedó **{net:,.2f}** "
+                    f"(gastaste más de lo que entró como ingreso **real** en ese tramo)."
+                )
+            elif egr > ing * 1.2 and ing > 0:
+                tips.append(
+                    f"**{cur}:** los egresos del período superan bastante a los ingresos registrados; "
+                    "verificá que no falten ingresos por cargar."
+                )
+    for cur, bal in sorted(by_cur_bal.items()):
+        if bal < 0:
+            tips.append(
+                f"**{cur}:** el **saldo calculado** total en cuentas seleccionadas es **negativo ({bal:,.2f})** "
+                "— revisá saldo inicial, movimientos o cuentas incluidas."
+            )
+    if dh:
+        for row in dh:
+            cur = str(row.get("Moneda", ""))
+            try:
+                sr = float(row.get("% egresos sin rubro") or 0)
+                sn = float(row.get("% ingresos sin negocio") or 0)
+            except (TypeError, ValueError):
+                sr, sn = 0.0, 0.0
+            if sr >= 25:
+                tips.append(
+                    f"**{cur}:** ~**{sr:.0f}%** de egresos **sin rubro** — clasificá para saber *en qué* gastaste."
+                )
+            if sn >= 25:
+                tips.append(
+                    f"**{cur}:** ~**{sn:.0f}%** de ingresos **sin negocio** — anotá *de dónde* entró el dinero."
+                )
+            fees = float(row.get("Comisiones (suma)") or 0)
+            if fees > 0:
+                tips.append(
+                    f"**{cur}:** hay **{fees:,.2f}** en comisiones registradas; tenelas en cuenta al cruzar con el banco."
+                )
+    if not tips:
+        tips.append(
+            "Con estos números no saltan alertas fuertes: igual compará **saldos** con extractos y la **sección 1.1** "
+            "(negocio→cuenta, cuenta→rubro) para ver el recorrido del dinero."
+        )
+    return tips
 
 
 def _acc_map(accounts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -428,17 +651,17 @@ def _comparison_insight_append(
             continue
         if net_p == 0:
             lines.append(
-                f"**{cur}:** neto actual **{net_c:,.2f}** (sin neto comparable en {p0}–{p1})."
+                f"**{cur}:** neto actual **{net_c:,.2f}** (sin neto comparable en {_periodo_txt(p0, p1)})."
             )
         else:
             v = (net_c - net_p) / abs(net_p) * 100.0
             lines.append(
-                f"**{cur}:** neto **{net_c:,.2f}** vs **{net_p:,.2f}** en {p0}–{p1} "
+                f"**{cur}:** neto **{net_c:,.2f}** vs **{net_p:,.2f}** en {_periodo_txt(p0, p1)} "
                 f"({v:+.1f} % vs período anterior)."
             )
     if not lines:
         lines.append(
-            f"Período anterior **{p0}** a **{p1}:** sin datos comparables en las cuentas elegidas."
+            f"Período anterior {_periodo_txt(p0, p1)}: sin datos comparables en las cuentas elegidas."
         )
     return lines
 
@@ -562,6 +785,9 @@ def _build_pdf_bytes(
     transfer_legs_rows: list[list[str]] | None = None,
     comparison_rows: list[list[str]] | None = None,
     health_rows: list[list[str]] | None = None,
+    balance_head: list[str] | None = None,
+    balance_rows: list[list[str]] | None = None,
+    recommendation_lines: list[str] | None = None,
 ) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import landscape, letter
@@ -616,6 +842,36 @@ def _build_pdf_bytes(
     )
     story.append(t1)
     story.append(Spacer(1, 10))
+    if balance_head and balance_rows:
+        story.append(
+            Paragraph("<b>Saldos por cuenta al cierre del período</b>", styles["Heading2"])
+        )
+        story.append(
+            Paragraph(
+                "<i>Saldo inicial registrado + ingresos − egresos, con movimientos hasta la fecha «hasta» del reporte.</i>",
+                styles["Normal"],
+            )
+        )
+        story.append(Spacer(1, 4))
+        t_bal = Table([balance_head] + balance_rows[:100], repeatRows=1)
+        t_bal.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#14532d")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("GRID", (0, 0), (-1, -1), 0.2, colors.grey),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        story.append(t_bal)
+        story.append(Spacer(1, 8))
+    if recommendation_lines:
+        story.append(Paragraph("<b>Recomendaciones</b>", styles["Heading2"]))
+        for rl in recommendation_lines[:20]:
+            story.append(Paragraph(f"• {_pdf_safe_line(rl)}", styles["Normal"]))
+            story.append(Spacer(1, 2))
+        story.append(Spacer(1, 6))
     if health_rows:
         story.append(Paragraph("<b>Calidad de datos (resumen)</b>", styles["Heading2"]))
         story.append(
@@ -989,9 +1245,19 @@ def render_reports_page(
     today = date.today()
     c1, c2, c3 = st.columns(3)
     with c1:
-        d0 = st.date_input("Desde", value=today.replace(day=1), key="rep_d0")
+        d0 = st.date_input(
+            "Desde",
+            value=today.replace(day=1),
+            key="rep_d0",
+            format="DD/MM/YYYY",
+        )
     with c2:
-        d1 = st.date_input("Hasta", value=today, key="rep_d1")
+        d1 = st.date_input(
+            "Hasta",
+            value=today,
+            key="rep_d1",
+            format="DD/MM/YYYY",
+        )
     with c3:
         opts = {str(a["id"]): f'{a.get("label")} ({a.get("currency", "?")})' for a in accounts}
         sel = st.multiselect(
@@ -1008,6 +1274,14 @@ def render_reports_page(
 
     txs = load_tx_date_range(sb, sel, d0, d1)
     amap = _acc_map(accounts)
+    txs_until: list[dict[str, Any]] = []
+    try:
+        txs_until = load_txs_until_date(sb, sel, d1, limit=12000)
+    except Exception as e:
+        st.warning(
+            f"No se pudieron cargar el historial para **saldos al {_fmt_date_es(d1)}**: {e}. "
+            "Revisá conexión o intentá de nuevo."
+        )
 
     with st.expander("Cómo leer este reporte (todo conectado)", expanded=True):
         st.markdown(
@@ -1030,6 +1304,12 @@ def render_reports_page(
 
             El **detalle** al final va agrupado (ingresos, luego egresos por rubro). El **PDF** es **carta US apaisada**,
             columnas calculadas al ancho útil para que no se corten al imprimir en Letter.
+
+            **Saldos** = saldo inicial de cada cuenta + movimientos con fecha **hasta** el día «Hasta» (como Movimientos), **por cuenta**;
+            no mezcla USD con Bs. **Recomendaciones** = lectura automática simple (alertas de clasificación, flujo, traspasos).
+
+            Las fechas en pantalla y en exportes usan formato **día/mes/año (DD/MM/AAAA)**. Arriba tenés un **resumen rápido**;
+            muchas tablas largas se muestran **acortadas** y el resto queda en expanders o en CSV/PDF.
             """
         )
 
@@ -1084,23 +1364,83 @@ def render_reports_page(
 
     guide_lines_pdf = [
         "PDF en tamaño carta US (Letter) apaisado, márgenes 1/2 pulgada; tablas con anchos proporcionales al ancho útil para evitar cortes.",
+        "Saldos por cuenta al cierre = saldo inicial más ingresos menos egresos hasta la fecha fin del período (misma lógica que la app).",
         "Flujo real = ingresos y egresos sin contar traspasos entre cuentas propias (si la casilla está activa en la app).",
         "Traspaso = egreso en un origen e ingreso en un destino; el patrimonio total no cambia, solo la cuenta donde está el dinero.",
         "Tras los totales por moneda: tablas negocio→cuenta y cuenta→rubro (como el Panorama global), luego rubro solo y negocio solo.",
-        "Incluye calidad de datos, comparación con período anterior, traspasos y piernas.",
+        "Incluye recomendaciones automáticas, calidad de datos, comparación con período anterior, traspasos y piernas.",
     ]
+
+    dh = _data_health_rows(txs_use, amap)
+    bal_ui, bal_pdf, by_cur_bal = _report_balance_rows(sel, amap, txs_until, d1)
+    rec_lines = _report_recommendations(
+        by_cur=dict(by_cur),
+        dh=dh,
+        n_transfer=len(txs_transfer_like),
+        exclude_transfers=exclude_transfers,
+        by_cur_bal=by_cur_bal,
+    )
+
+    brief_lines = _brief_period_summary(
+        d0,
+        d1,
+        dict(by_cur),
+        by_cur_bal,
+        len(txs_transfer_like),
+        exclude_transfers,
+    )
+    st.markdown(
+        '<p class="lk-section" style="margin-top:0;">📌 Resumen rápido</p>',
+        unsafe_allow_html=True,
+    )
+    for bl in brief_lines:
+        st.markdown(f"- {bl}")
+    st.markdown("---")
+
+    st.markdown(
+        '<p class="lk-section" style="margin-top:0;">💰 Saldos al cierre y lectura del período</p>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        f"**Fecha de cierre para saldos:** **{_fmt_date_es(d1)}** (usa todos los movimientos cargados hasta esa fecha, máx. 12000 por consulta). "
+        "Compará estos saldos con **extractos bancarios** cuenta por cuenta."
+    )
+    if bal_ui:
+        bal_show = [{k: v for k, v in r.items() if k != "Mov. en cálculo"} for r in bal_ui]
+        st.dataframe(pd.DataFrame(bal_show), use_container_width=True, hide_index=True)
+        _sum_parts = [f"**{c}:** {v:,.2f}" for c, v in sorted(by_cur_bal.items())]
+        st.markdown("**Suma de saldos por moneda** (solo cuentas incluidas; no convierte entre monedas): " + " · ".join(_sum_parts))
+        if any(r.get("Mov. en cálculo", 0) >= 11000 for r in bal_ui):
+            st.warning(
+                "Alguna cuenta tiene **muchos** movimientos en el cálculo (cerca del límite de 12000). "
+                "Si el saldo no cuadra con el banco, puede faltar historia antigua: contactá soporte o archivá por años."
+            )
+        with st.expander("🔧 Cuántos movimientos se usaron por cuenta (detalle técnico)", expanded=False):
+            st.dataframe(pd.DataFrame(bal_ui), use_container_width=True, hide_index=True)
+    else:
+        st.caption("No hay cuentas seleccionadas o no se pudieron calcular saldos.")
+    st.caption(
+        f"**Qué pasó entre {_fmt_date_es(d0)} y {_fmt_date_es(d1)}:** ingresos reales / egresos / traspasos → secciones **1**, **1.1** y **2**. "
+        "**Cómo quedaste:** filas de arriba = dinero **hoy** en cada caja según la app."
+    )
+    with st.expander("💡 Recomendaciones (automáticas)", expanded=True):
+        for line in rec_lines:
+            st.markdown(f"- {line}")
 
     st.markdown(
         '<p class="lk-section" style="margin-top:0;">✅ Calidad de datos y comparación</p>',
         unsafe_allow_html=True,
     )
     st.caption(
-        f"Período anterior para la comparación: **{p0}** a **{p1}** (misma duración en días que tu rango)."
+        f"Período anterior para la comparación: **{_periodo_txt(p0, p1)}** (misma duración en días que tu rango)."
     )
-    dh = _data_health_rows(txs_use, amap)
     if dh:
         st.markdown("**Clasificación y comisiones** (solo flujo del período, según traspasos arriba).")
-        st.dataframe(pd.DataFrame(dh), use_container_width=True, hide_index=True)
+        dh_show = pd.DataFrame(dh)
+        for col in ("% egresos sin rubro", "% ingresos sin negocio"):
+            if col in dh_show.columns:
+                dh_show[col] = pd.to_numeric(dh_show[col], errors="coerce").round(0)
+        st.dataframe(dh_show, use_container_width=True, hide_index=True)
     else:
         st.caption("Sin movimientos de flujo: no hay métricas de calidad.")
     cmp_df = pd.DataFrame(_comparison_table_rows(dict(by_cur), dict(by_cur_prev)))
@@ -1156,34 +1496,42 @@ def render_reports_page(
             inc_rows = blk.get("ingreso_negocio_cuenta") or []
             if inc_rows:
                 st.markdown("*Ingresos — negocio → cuenta donde entra*")
-                st.dataframe(
-                    pd.DataFrame(inc_rows).rename(
-                        columns={
-                            "negocio": "Negocio / fuente",
-                            "cuenta": "Cuenta donde entra",
-                            "total": f"Total ({cur})",
-                            "pct": "% del total ingresos",
-                        }
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
+                d_inc = pd.DataFrame(inc_rows).rename(
+                    columns={
+                        "negocio": "Negocio / fuente",
+                        "cuenta": "Cuenta donde entra",
+                        "total": f"Total ({cur})",
+                        "pct": "% del total ingresos",
+                    }
+                )
+                for c in d_inc.columns:
+                    if "%" in str(c):
+                        d_inc[c] = pd.to_numeric(d_inc[c], errors="coerce").round(0)
+                _st_df_preview(
+                    d_inc,
+                    _REPORT_PREVIEW_11,
+                    f"Todos los ingresos ({cur}) — negocio → cuenta",
                 )
             else:
                 st.caption("Sin ingresos en esta moneda en el período.")
             egr_rows = blk.get("egreso_cuenta_rubro") or []
             if egr_rows:
                 st.markdown("*Egresos — cuenta de la que sale → rubro*")
-                st.dataframe(
-                    pd.DataFrame(egr_rows).rename(
-                        columns={
-                            "cuenta": "Cuenta de la que sale",
-                            "rubro": "Rubro / gasto",
-                            "total": f"Total ({cur})",
-                            "pct": "% del total egresos",
-                        }
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
+                d_egr = pd.DataFrame(egr_rows).rename(
+                    columns={
+                        "cuenta": "Cuenta de la que sale",
+                        "rubro": "Rubro / gasto",
+                        "total": f"Total ({cur})",
+                        "pct": "% del total egresos",
+                    }
+                )
+                for c in d_egr.columns:
+                    if "%" in str(c):
+                        d_egr[c] = pd.to_numeric(d_egr[c], errors="coerce").round(0)
+                _st_df_preview(
+                    d_egr,
+                    _REPORT_PREVIEW_11,
+                    f"Todos los egresos ({cur}) — cuenta → rubro",
                 )
             else:
                 st.caption("Sin egresos en esta moneda en el período.")
@@ -1196,7 +1544,11 @@ def render_reports_page(
     )
     st.caption("Totales de **ingresos** y **egresos** por cuenta en el período (misma regla de traspasos que arriba).")
     if acc_rows:
-        st.dataframe(pd.DataFrame(acc_rows), use_container_width=True, hide_index=True)
+        _st_df_preview(
+            pd.DataFrame(acc_rows),
+            12,
+            "Todas las cuentas con flujo en el período",
+        )
     else:
         st.caption("Sin movimientos de flujo en el período.")
 
@@ -1285,7 +1637,7 @@ def render_reports_page(
             g = g.dropna(subset=["dt"])
             if g.empty:
                 continue
-            g["periodo"] = g["dt"].dt.strftime("%Y-%m-%d")
+            g["periodo"] = g["dt"].dt.strftime("%d/%m/%Y")
             fig_t = go.Figure()
             fig_t.add_trace(
                 go.Bar(
@@ -1312,61 +1664,61 @@ def render_reports_page(
             )
             st.plotly_chart(fig_t, use_container_width=True)
 
-    st.markdown(
-        '<p class="lk-section">🔻 1.5 Egresos por rubro solo (por moneda)</p>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Agrupa **solo por rubro** (sin mostrar la cuenta de salida); útil para comparar con la **torta** de egresos. "
-        "Para **cuenta + rubro** usá la **1.1**."
-    )
-    if not analysis:
-        st.caption("Sin movimientos de flujo en el período para analizar.")
-    else:
-        for blk in analysis:
-            cur = blk["currency"]
-            egr = blk["egr"]
-            dr = blk.get("rubros") or []
-            st.markdown(f"**Moneda {cur}** — total egresos en flujo **{egr:,.2f}**")
-            if dr:
-                st.dataframe(
-                    pd.DataFrame(dr).rename(
+    with st.expander(
+        "🔻🔺 1.5 y 1.6 — Tablas numéricas por rubro y por negocio (mismo dato que las tortas; opcional)",
+        expanded=False,
+    ):
+        st.markdown(
+            '<p class="lk-section" style="margin-top:0;">🔻 1.5 Egresos por rubro solo (por moneda)</p>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Agrupa **solo por rubro**. Para **cuenta + rubro** usá la **1.1**; para ver proporciones, los **gráficos 1.3**."
+        )
+        if not analysis:
+            st.caption("Sin movimientos de flujo en el período para analizar.")
+        else:
+            for blk in analysis:
+                cur = blk["currency"]
+                egr = blk["egr"]
+                dr = blk.get("rubros") or []
+                st.markdown(f"**Moneda {cur}** — total egresos en flujo **{egr:,.2f}**")
+                if dr:
+                    d5 = pd.DataFrame(dr).rename(
                         columns={"rubro": "Rubro", "total": "Total", "pct": "% del total egresos"}
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                st.caption("Sin egresos con rubro en esta moneda.")
+                    )
+                    for c in d5.columns:
+                        if "%" in str(c):
+                            d5[c] = pd.to_numeric(d5[c], errors="coerce").round(0)
+                    st.dataframe(d5, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("Sin egresos con rubro en esta moneda.")
 
-    st.markdown(
-        '<p class="lk-section">🔺 1.6 Ingresos por negocio solo (por moneda)</p>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Agrupa **solo por negocio** (sin cuenta destino); útil para la **torta** de ingresos. "
-        "Para **negocio + cuenta** usá la **1.1**."
-    )
-    if analysis:
-        for blk in analysis:
-            cur = blk["currency"]
-            ing = blk["ing"]
-            dn = blk.get("negocios") or []
-            st.markdown(f"**Moneda {cur}** — total ingresos en flujo **{ing:,.2f}**")
-            if dn:
-                st.dataframe(
-                    pd.DataFrame(dn).rename(
+        st.markdown(
+            '<p class="lk-section">🔺 1.6 Ingresos por negocio solo (por moneda)</p>',
+            unsafe_allow_html=True,
+        )
+        st.caption("Agrupa **solo por negocio**. Para **negocio + cuenta** usá la **1.1**.")
+        if analysis:
+            for blk in analysis:
+                cur = blk["currency"]
+                ing = blk["ing"]
+                dn = blk.get("negocios") or []
+                st.markdown(f"**Moneda {cur}** — total ingresos en flujo **{ing:,.2f}**")
+                if dn:
+                    d6 = pd.DataFrame(dn).rename(
                         columns={
                             "negocio": "Negocio / fuente",
                             "total": "Total",
                             "pct": "% del total ingresos",
                         }
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                st.caption("Sin ingresos con negocio en esta moneda.")
+                    )
+                    for c in d6.columns:
+                        if "%" in str(c):
+                            d6[c] = pd.to_numeric(d6[c], errors="coerce").round(0)
+                    st.dataframe(d6, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("Sin ingresos con negocio en esta moneda.")
 
     st.markdown(
         '<p class="lk-section">🔀 2. Traspasos (origen → destino)</p>',
@@ -1394,7 +1746,13 @@ def render_reports_page(
                     "descripcion": "descripcion",
                 }
             )
-            st.dataframe(df_p, use_container_width=True, hide_index=True)
+            if not df_p.empty and "fecha" in df_p.columns:
+                df_p["fecha"] = df_p["fecha"].map(_fmt_date_es)
+            _st_df_preview(
+                df_p,
+                _REPORT_PREVIEW_TRANSFER,
+                "Todos los traspasos enlazados (origen → destino)",
+            )
         if loose_tr:
             st.caption(
                 "Movimientos con etiqueta de traspaso **sin** `transfer_group_id` (datos viejos o creados fuera del "
@@ -1406,7 +1764,7 @@ def render_reports_page(
                 acc = amap.get(aid, {})
                 loose_rows.append(
                     {
-                        "fecha": t.get("tx_date"),
+                        "fecha": _fmt_date_es(t.get("tx_date")),
                         "cuenta": acc.get("label", aid[:8]),
                         "tipo": t.get("tx_type"),
                         "monto": float(t.get("amount") or 0),
@@ -1426,13 +1784,13 @@ def render_reports_page(
     else:
         st.caption(
             f"**{len(txs_transfer_like)}** movimiento(s): cada fila es un egreso o ingreso que forma parte de un traspaso. "
-            "Así ves todo lo que entró y salió entre cuentas, además del resumen 2."
+            "Listado técnico; el resumen operativo está en la **sección 2**."
         )
-        st.dataframe(
-            pd.DataFrame(_transfer_legs_list(txs_transfer_like, amap)),
-            use_container_width=True,
-            hide_index=True,
-        )
+        legs_df = pd.DataFrame(_transfer_legs_list(txs_transfer_like, amap))
+        if not legs_df.empty and "fecha" in legs_df.columns:
+            legs_df["fecha"] = legs_df["fecha"].map(_fmt_date_es)
+        with st.expander("Ver listado completo de piernas (egreso/ingreso por línea)", expanded=False):
+            st.dataframe(legs_df, use_container_width=True, hide_index=True)
 
     st.markdown(
         '<p class="lk-section">📋 3. Todo por moneda (incl. traspasos)</p>',
@@ -1497,7 +1855,9 @@ def render_reports_page(
             by=["rubro", "fecha"], ascending=[True, False], na_position="last"
         )
         df = pd.concat([df_ing, df_eg], ignore_index=True)
-        df["fecha"] = df["fecha"].dt.date
+        df["fecha"] = df["fecha"].apply(
+            lambda x: _fmt_date_es(x) if pd.notna(x) else ""
+        )
 
     st.markdown(
         '<p class="lk-section">🗂 4. Detalle agrupado (ing / egr)</p>',
@@ -1520,7 +1880,11 @@ def render_reports_page(
     if df.empty:
         st.caption("Nada que mostrar con los filtros actuales.")
     else:
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        _st_df_preview(
+            df,
+            _REPORT_PREVIEW_DETAIL,
+            "Todo el detalle de movimientos (ingresos y egresos)",
+        )
     detail_head = [
         "Fecha",
         "Cuenta",
@@ -1562,7 +1926,7 @@ def render_reports_page(
         rub_neg = _disp_str(t.get("category")) or _disp_str(t.get("business")) or ""
         detail_rows_pdf.append(
             [
-                str(t.get("tx_date", ""))[:10],
+                _fmt_date_es(t.get("tx_date")),
                 str(acc.get("label", ""))[:16],
                 cur,
                 (t.get("tx_type") or "")[:1].upper(),
@@ -1592,7 +1956,7 @@ def render_reports_page(
         for p in paired_tr:
             transfer_rows_pdf.append(
                 [
-                    str(p.get("fecha", ""))[:10],
+                    _fmt_date_es(p.get("fecha")),
                     str(p.get("desde", ""))[:16],
                     f'{float(p.get("sale") or 0):,.2f}',
                     str(p.get("mon_sale", ""))[:4],
@@ -1608,7 +1972,7 @@ def render_reports_page(
             is_eg = str(t.get("tx_type")) == "egreso"
             transfer_rows_pdf.append(
                 [
-                    str(t.get("tx_date", ""))[:10],
+                    _fmt_date_es(t.get("tx_date")),
                     str(acc.get("label", ""))[:14] if is_eg else "—",
                     f'{float(t.get("amount") or 0):,.2f}' if is_eg else "—",
                     str(acc.get("currency", "?"))[:4],
@@ -1645,7 +2009,7 @@ def render_reports_page(
         for row in _transfer_legs_list(txs_transfer_like, amap):
             transfer_legs_rows_pdf.append(
                 [
-                    str(row.get("fecha", ""))[:10],
+                    _fmt_date_es(row.get("fecha")),
                     str(row.get("cuenta", ""))[:18],
                     (str(row.get("tipo", ""))[:1] or "?").upper(),
                     f'{float(row.get("monto") or 0):,.2f}',
@@ -1697,12 +2061,13 @@ def render_reports_page(
         sum_rows, columns=["Moneda", "Ingresos", "Egresos", "Neto período"]
     )
     df_csv_acc = pd.DataFrame(acc_rows) if acc_rows else pd.DataFrame()
-    dc1, dc2, dc3, dc4 = st.columns(4)
+    df_csv_bal = pd.DataFrame(bal_ui) if bal_ui else pd.DataFrame()
+    dc1, dc2, dc3, dc4, dc5 = st.columns(5)
     with dc1:
         st.download_button(
             "CSV · monedas",
             data=_df_to_csv_bytes(df_csv_mon),
-            file_name=f"kf_reporte_monedas_{d0}_{d1}.csv",
+            file_name=f"kf_reporte_monedas_{_filename_date(d0)}_{_filename_date(d1)}.csv",
             mime="text/csv",
             key="rep_csv_mon",
         )
@@ -1710,23 +2075,31 @@ def render_reports_page(
         st.download_button(
             "CSV · por cuenta",
             data=_df_to_csv_bytes(df_csv_acc),
-            file_name=f"kf_reporte_cuentas_{d0}_{d1}.csv",
+            file_name=f"kf_reporte_cuentas_{_filename_date(d0)}_{_filename_date(d1)}.csv",
             mime="text/csv",
             key="rep_csv_acc",
         )
     with dc3:
         st.download_button(
-            "CSV · comparación",
-            data=_df_to_csv_bytes(cmp_df),
-            file_name=f"kf_reporte_comparacion_{d0}_{d1}.csv",
+            "CSV · saldos al cierre",
+            data=_df_to_csv_bytes(df_csv_bal),
+            file_name=f"kf_reporte_saldos_{_filename_date(d1)}.csv",
             mime="text/csv",
-            key="rep_csv_cmp",
+            key="rep_csv_bal",
         )
     with dc4:
         st.download_button(
+            "CSV · comparación",
+            data=_df_to_csv_bytes(cmp_df),
+            file_name=f"kf_reporte_comparacion_{_filename_date(d0)}_{_filename_date(d1)}.csv",
+            mime="text/csv",
+            key="rep_csv_cmp",
+        )
+    with dc5:
+        st.download_button(
             "CSV · detalle",
             data=_df_to_csv_bytes(df),
-            file_name=f"kf_reporte_detalle_{d0}_{d1}.csv",
+            file_name=f"kf_reporte_detalle_{_filename_date(d0)}_{_filename_date(d1)}.csv",
             mime="text/csv",
             key="rep_csv_det",
         )
@@ -1734,7 +2107,7 @@ def render_reports_page(
     try:
         pdf = _build_pdf_bytes(
             "Kenny Finanzas — Resumen gerencial",
-            f"Período: {d0} a {d1}",
+            f"Período: {_periodo_txt(d0, d1)}",
             guide_lines_pdf,
             flow_caption,
             insight_lines,
@@ -1749,11 +2122,14 @@ def render_reports_page(
             transfer_legs_rows=transfer_legs_rows_pdf,
             comparison_rows=comparison_rows_pdf,
             health_rows=health_rows_pdf,
+            balance_head=["Cuenta", "Moneda", "Saldo", "Movs"] if bal_pdf else None,
+            balance_rows=bal_pdf if bal_pdf else None,
+            recommendation_lines=rec_lines,
         )
         st.download_button(
             "PDF (carta apaisada)",
             data=pdf,
-            file_name=f"kenny_finanzas_{d0}_{d1}.pdf",
+            file_name=f"kenny_finanzas_{_filename_date(d0)}_{_filename_date(d1)}.pdf",
             mime="application/pdf",
             type="primary",
             key="rep_pdf_dl",
