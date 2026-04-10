@@ -858,7 +858,7 @@ def render_reports_page(
     umap: dict[str, str],
 ) -> None:
     st.markdown(
-        '<p class="lk-section" style="margin-top:0;">Reportes inteligentes</p>',
+        '<p class="lk-section" style="margin-top:0;">📈 Reportes inteligentes</p>',
         unsafe_allow_html=True,
     )
     st.caption(
@@ -972,7 +972,7 @@ def render_reports_page(
     ]
 
     st.markdown(
-        '<p class="lk-section" style="margin-top:0;">Calidad de datos y comparación</p>',
+        '<p class="lk-section" style="margin-top:0;">✅ Calidad de datos y comparación</p>',
         unsafe_allow_html=True,
     )
     st.caption(
@@ -991,7 +991,7 @@ def render_reports_page(
 
     st.markdown("---")
     st.markdown(
-        '<p class="lk-section" style="margin-top:0;">1. Flujo del período (para entender negocio)</p>',
+        '<p class="lk-section" style="margin-top:0;">1️⃣ Flujo del período (negocio)</p>',
         unsafe_allow_html=True,
     )
     st.caption(flow_caption)
@@ -1021,7 +1021,7 @@ def render_reports_page(
 
     acc_rows = _flow_by_account(txs_use, amap)
     st.markdown(
-        '<p class="lk-section">1.2 Flujo por cuenta (de qué caja sale y entra)</p>',
+        '<p class="lk-section">🏦 1.2 Flujo por cuenta</p>',
         unsafe_allow_html=True,
     )
     st.caption("Totales de **ingresos** y **egresos** por cuenta en el período (misma regla de traspasos que arriba).")
@@ -1032,7 +1032,7 @@ def render_reports_page(
 
     layout_p, axis_p = _reports_plotly_layout()
     st.markdown(
-        '<p class="lk-section">1.3 Gráficos por moneda (rubros y negocios)</p>',
+        '<p class="lk-section">📊 1.3 Gráficos por moneda</p>',
         unsafe_allow_html=True,
     )
     st.caption("Mismos datos que las tablas 1.5 y 1.6; máximo 8 ítems y el resto en **Otros**.")
@@ -1097,7 +1097,7 @@ def render_reports_page(
         st.caption("Sin datos para gráficos.")
 
     st.markdown(
-        '<p class="lk-section">1.4 Tendencia en el tiempo (flujo agregado)</p>',
+        '<p class="lk-section">📉 1.4 Tendencia en el tiempo</p>',
         unsafe_allow_html=True,
     )
     ts_df = _txs_to_timeseries_df(txs_use, amap)
@@ -1143,7 +1143,7 @@ def render_reports_page(
             st.plotly_chart(fig_t, use_container_width=True)
 
     st.markdown(
-        '<p class="lk-section">1.5 Resumen de EGRESOS por rubro (por moneda)</p>',
+        '<p class="lk-section">🔻 1.5 Egresos por rubro (por moneda)</p>',
         unsafe_allow_html=True,
     )
     st.caption(
@@ -1170,7 +1170,7 @@ def render_reports_page(
                 st.caption("Sin egresos con rubro en esta moneda.")
 
     st.markdown(
-        '<p class="lk-section">1.6 Resumen de INGRESOS por negocio / fuente (por moneda)</p>',
+        '<p class="lk-section">🔺 1.6 Ingresos por negocio (por moneda)</p>',
         unsafe_allow_html=True,
     )
     st.caption(
@@ -1199,7 +1199,7 @@ def render_reports_page(
                 st.caption("Sin ingresos con negocio en esta moneda.")
 
     st.markdown(
-        '<p class="lk-section">2. Traspasos entre cuentas (origen → destino)</p>',
+        '<p class="lk-section">🔀 2. Traspasos (origen → destino)</p>',
         unsafe_allow_html=True,
     )
     if not txs_transfer_like:
@@ -1248,7 +1248,7 @@ def render_reports_page(
             st.dataframe(pd.DataFrame(loose_rows), use_container_width=True, hide_index=True)
 
     st.markdown(
-        '<p class="lk-section">2b. Todas las piernas de traspaso (listado completo)</p>',
+        '<p class="lk-section">🔗 2b. Piernas de traspaso (listado)</p>',
         unsafe_allow_html=True,
     )
     if not txs_transfer_like:
@@ -1265,7 +1265,7 @@ def render_reports_page(
         )
 
     st.markdown(
-        '<p class="lk-section">3. Todo registrado por moneda (incluye traspasos)</p>',
+        '<p class="lk-section">📋 3. Todo por moneda (incl. traspasos)</p>',
         unsafe_allow_html=True,
     )
     if exclude_transfers and txs_transfer_like:
@@ -1330,7 +1330,7 @@ def render_reports_page(
         df["fecha"] = df["fecha"].dt.date
 
     st.markdown(
-        '<p class="lk-section">4. Detalle agrupado (ingresos arriba, egresos abajo; orden por rubro/negocio y fecha)</p>',
+        '<p class="lk-section">🗂 4. Detalle agrupado (ing / egr)</p>',
         unsafe_allow_html=True,
     )
     st.caption(
@@ -1519,7 +1519,7 @@ def render_reports_page(
             )
 
     st.markdown(
-        '<p class="lk-section">Descargas (CSV y PDF)</p>',
+        '<p class="lk-section">📥 Descargas (CSV y PDF)</p>',
         unsafe_allow_html=True,
     )
     st.caption("CSV en **UTF-8 con BOM** para Excel. Misma ventana de fechas y cuentas que arriba.")

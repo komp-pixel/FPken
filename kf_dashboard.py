@@ -631,13 +631,13 @@ def render_finance_dashboard(
 
     tab_met, tab_sum, tab_d, tab_m, tab_y, tab_neg, tab_cat = st.tabs(
         [
-            "Cumplimiento",
-            "Resumen",
-            "Diario",
-            "Mensual",
-            "Anual",
-            "Ingresos",
-            "Gastos",
+            "🎯 Cumplimiento",
+            "📎 Resumen",
+            "📅 Diario",
+            "🗓 Mensual",
+            "📆 Anual",
+            "🔺 Ingresos",
+            "🔻 Gastos",
         ]
     )
 
@@ -1063,7 +1063,7 @@ def render_global_accounts_panorama(
     y totales por cuenta, **por moneda** (no mezcla USD con Bs).
     """
     st.markdown(
-        '<p class="lk-section" style="margin-top:0;">Panorama de todas las cuentas</p>',
+        '<p class="lk-section" style="margin-top:0;">🌎 Panorama de todas las cuentas</p>',
         unsafe_allow_html=True,
     )
     st.caption(

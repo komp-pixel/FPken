@@ -496,16 +496,18 @@ def _wallet_row_dict(
 
 
 def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, Any], *, account_owner_id: str) -> None:
-    st.markdown('<p class="lk-section" style="margin-top:0;">Cuentas y métodos de pago</p>', unsafe_allow_html=True)
-    st.caption(
-        "**Banco** = Banesco, BofA, Banca Amiga, Pago Móvil… "
-        "**Wallet** = Binance / USDT / on-chain. "
-        "**App** = Zinly, Zelle."
+    st.markdown(
+        '<p class="lk-section" style="margin-top:0;">🏦 Cuentas y métodos de pago</p>',
+        unsafe_allow_html=True,
     )
-    st.info(
-        "SQL en Supabase: **`patch_004`**, **`patch_005_account_kind.sql`**, "
-        "**`patch_006_wallet_deposit.sql`** y **`patch_008_owner_user_scope.sql`**."
-    )
+    with st.expander("ℹ️ Tipos de cuenta y parches SQL", expanded=False):
+        st.caption(
+            "**Banco** = Banesco, BofA, Banca Amiga… · **Wallet** = Binance / USDT / on-chain · **App** = Zinly, Zelle."
+        )
+        st.info(
+            "SQL en Supabase: **`patch_004`**, **`patch_005_account_kind.sql`**, "
+            "**`patch_006_wallet_deposit.sql`** y **`patch_008_owner_user_scope.sql`**."
+        )
 
     acc_ids = [str(a["id"]) for a in accounts]
     txs_by_acc: dict[str, list[dict[str, Any]]] = {aid: [] for aid in acc_ids}
@@ -522,15 +524,16 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
         str(a["id"]): compute_balance(a, txs_by_acc.get(str(a["id"]), [])) for a in accounts
     }
 
-    render_payment_method_cards(
-        accounts,
-        heading="Tus cuentas (saldo al día)",
-        balances_by_account_id=balances_by_id,
-        balance_as_of=date.today(),
-    )
-    st.divider()
+    with st.expander("💼 Tus cuentas · saldos al día", expanded=True):
+        render_payment_method_cards(
+            accounts,
+            heading="Tarjetas",
+            balances_by_account_id=balances_by_id,
+            balance_as_of=date.today(),
+        )
 
-    st.markdown('<p class="lk-section">Editar registro</p>', unsafe_allow_html=True)
+    with st.expander("✏️ Editar un registro", expanded=True):
+        st.markdown('<p class="lk-section" style="margin-top:0;">Datos de la cuenta</p>', unsafe_allow_html=True)
     opts = {
         str(a["id"]): f'[{ACCOUNT_KIND_LABELS.get(_infer_account_kind(a), "?")}] {a.get("label")} ({a.get("currency")})'
         for a in accounts
@@ -688,7 +691,8 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
                 st.error("No se pudo guardar.")
                 st.code(wmsg or "")
 
-    st.markdown('<p class="lk-section">Eliminar registro</p>', unsafe_allow_html=True)
+    with st.expander("🗑 Eliminar cuenta", expanded=False):
+        st.markdown('<p class="lk-section" style="margin-top:0;">Borrar registro</p>', unsafe_allow_html=True)
     st.caption(
         "Si esta cuenta se creó duplicada o por error, podés borrarla aquí. "
         "Se eliminan también todos los movimientos de esa cuenta."
@@ -708,27 +712,26 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
             else:
                 st.error(msg_del or "No se pudo eliminar la cuenta.")
 
-
-
-    st.divider()
-
-
     by_k: dict[str, list[dict[str, Any]]] = {"banco": [], "wallet": [], "app_pagos": []}
     for a in accounts:
         by_k[_infer_account_kind(a)].append(a)
 
-    st.markdown('<p class="lk-section">Dar de alta por tipo</p>', unsafe_allow_html=True)
+    with st.expander("➕ Nueva cuenta (banco · wallet · app)", expanded=False):
+        st.markdown(
+            '<p class="lk-section" style="margin-top:0;">Alta por tipo</p>',
+            unsafe_allow_html=True,
+        )
     for kind, title in (
-        ("banco", "Cuentas bancarias"),
-        ("wallet", "Wallets y crypto"),
-        ("app_pagos", "Apps de pago (Zinly, Zelle…)"),
+        ("banco", "🏦 Cuentas bancarias"),
+        ("wallet", "🪙 Wallets y crypto"),
+        ("app_pagos", "📱 Apps de pago (Zinly, Zelle…)"),
     ):
         st.markdown(f"#### {title}")
         if not by_k[kind]:
             st.caption("Ningún registro de este tipo todavía.")
 
         if kind == "banco":
-            with st.expander("Agregar cuenta **bancaria**", expanded=False):
+            with st.expander("➕ Agregar cuenta **bancaria**", expanded=False):
                 with st.form("add_banco"):
                     lb = st.text_input("Nombre (ej. Banesco ahorro)", key="ab_lb")
                     cur = st.selectbox("Moneda", CURRENCIES, index=0, key="ab_cur")
@@ -769,7 +772,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
                             st.error("Error al crear.")
                             st.code(wmsg or "")
         elif kind == "wallet":
-            with st.expander("Agregar **wallet / crypto**", expanded=False):
+            with st.expander("➕ Agregar **wallet / crypto**", expanded=False):
                 st.caption(
                     "En Binance: **UID** y **Pay ID** salen del perfil / Pay; la **dirección de depósito** "
                     "la copiás en Wallet → Depositar → moneda y **red** (TRC20, BEP20, etc.)."
@@ -829,7 +832,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
                             st.error("Error al crear.")
                             st.code(wmsg or "")
         else:
-            with st.expander("Agregar **app de pagos** (Zinly, Zelle…)", expanded=False):
+            with st.expander("➕ Agregar **app de pagos** (Zinly, Zelle…)", expanded=False):
                 with st.form("add_app"):
                     lb = st.text_input("Nombre (ej. Zinly compras)", key="aa_lb")
                     cur = st.selectbox("Moneda", CURRENCIES, index=0, key="aa_cur")
@@ -1071,44 +1074,51 @@ def _should_skip_row(desc: str, *, filter_noise: bool) -> bool:
 
 
 def page_users_admin(sb: Client) -> None:
-    st.markdown('<p class="lk-section" style="margin-top:0;">Usuarios</p>', unsafe_allow_html=True)
-    st.caption("Solo administradores. Orlando y Kenny pueden tener cada uno su usuario.")
-    with st.form("nu"):
-        dn = st.text_input("Nombre para mostrar")
-        un = st.text_input("Usuario (sin espacios)")
-        adm = st.checkbox("Es administrador (puede crear más usuarios)", value=False)
-        p1 = st.text_input("Contraseña", type="password")
-        p2 = st.text_input("Repetir contraseña", type="password")
-        if st.form_submit_button("Crear usuario"):
-            if not dn.strip() or not un.strip():
-                st.error("Completá nombre y usuario.")
-            elif len(p1) < 8:
-                st.error("Mínimo 8 caracteres en la contraseña.")
-            elif p1 != p2:
-                st.error("Las contraseñas no coinciden.")
-            else:
-                from kf_auth import _hash_password
+    st.markdown(
+        '<p class="lk-section" style="margin-top:0;">👥 Usuarios del sistema</p>',
+        unsafe_allow_html=True,
+    )
+    with st.expander("➕ Crear usuario (solo admin)", expanded=True):
+        st.caption("Cada persona puede tener su propio login y cuentas aisladas.")
+        with st.form("nu"):
+            dn = st.text_input("Nombre para mostrar")
+            un = st.text_input("Usuario (sin espacios)")
+            adm = st.checkbox("Es administrador (puede crear más usuarios)", value=False)
+            p1 = st.text_input("Contraseña", type="password")
+            p2 = st.text_input("Repetir contraseña", type="password")
+            if st.form_submit_button("✅ Crear usuario"):
+                if not dn.strip() or not un.strip():
+                    st.error("Completá nombre y usuario.")
+                elif len(p1) < 8:
+                    st.error("Mínimo 8 caracteres en la contraseña.")
+                elif p1 != p2:
+                    st.error("Las contraseñas no coinciden.")
+                else:
+                    from kf_auth import _hash_password
 
-                try:
-                    sb.table("kf_users").insert(
-                        {
-                            "username": un.strip().lower(),
-                            "display_name": dn.strip(),
-                            "password_hash": _hash_password(p1),
-                            "is_admin": adm,
-                            "active": True,
-                        }
-                    ).execute()
-                    st.success(f"Usuario «{un.strip().lower()}» creado.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"No se pudo crear (¿usuario duplicado?): {e}")
+                    try:
+                        sb.table("kf_users").insert(
+                            {
+                                "username": un.strip().lower(),
+                                "display_name": dn.strip(),
+                                "password_hash": _hash_password(p1),
+                                "is_admin": adm,
+                                "active": True,
+                            }
+                        ).execute()
+                        st.success(f"Usuario «{un.strip().lower()}» creado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"No se pudo crear (¿usuario duplicado?): {e}")
 
 
 def import_excel_section(
     sb: Client, account_id: str, user_id: str, display_name: str
 ) -> None:
-    st.markdown('<p class="lk-section" style="margin-top:0;">Importar desde Excel</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="lk-section" style="margin-top:0;">📥 Importar desde Excel</p>',
+        unsafe_allow_html=True,
+    )
     st.write(
         "Formato tipo **FECHA / DESCRIPCION / INGRESO / EGRESO** (BofA Kenny) o una sola columna de monto."
     )
@@ -1601,7 +1611,7 @@ def main() -> None:
             unsafe_allow_html=True,
         )
         st.caption("Banco, wallet y app son formularios distintos — no mezcles datos.")
-        tb, tw, ta = st.tabs(["Cuenta bancaria", "Wallet crypto", "App Zinly / Zelle"])
+        tb, tw, ta = st.tabs(["🏦 Cuenta bancaria", "🪙 Wallet crypto", "📱 App Zinly / Zelle"])
         with tb:
             with st.form("new_banco"):
                 label = st.text_input("Nombre", value="BofA — Orlando Linares")
@@ -1798,14 +1808,11 @@ def main() -> None:
     )
 
     tab_dash, tab_mov, tab_acc, tab_rep, tab_usr = st.tabs(
-        ["Dashboard", "Movimientos", "Cuentas", "Reportes", "Usuarios"]
+        ["📊 Dashboard", "📋 Movimientos", "🏦 Cuentas", "📈 Reportes", "👥 Usuarios"]
     )
 
     with tab_dash:
-        with st.expander(
-            "Tu cadena Venezuela: Zelle (USD) → USDT → Bs y por qué importa el BCV",
-            expanded=False,
-        ):
+        with st.expander("🇻🇪 Guía Venezuela · Zelle → USDT → Bs (BCV)", expanded=False):
             st.markdown(
                 """
 Si cobrás en **dólares por Zelle** pero te conviene **pasar a USDT** y después a **bolívares** para pagar gastos,
@@ -1819,81 +1826,65 @@ suele haber **gran diferencia** entre pagar todo en USD informal vs usar **Bs** 
 Así el **panorama** te muestra **de qué negocio entra** el dinero y **dónde lo gastás**, sin mezclar esos traspasos con el gasto real.
                 """
             )
-        try:
-            render_global_accounts_panorama(sb, accounts, load_transactions_for_accounts)
-        except Exception as e:
-            st.warning("El panorama global no pudo cargarse.")
-            st.code(str(e))
-        st.divider()
-        st.markdown(
-            '<p class="lk-section">Saldos por cuenta (todas a la vez)</p>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Saldo calculado por cuenta (inicial + movimientos). Más abajo: gráficos y metas usan la **cuenta del lateral**."
-        )
-        try:
-            _all_bal = all_balances_native(sb, accounts, load_transactions, compute_balance)
-            _render_balances_native_lk_cards(_all_bal)
-        except Exception as e:
-            st.warning("No se pudieron cargar todos los saldos de una vez.")
-            st.code(str(e))
-        st.divider()
-        st.markdown(
-            '<p class="lk-section">Gráficos y metas (cuenta del lateral)</p>',
-            unsafe_allow_html=True,
-        )
-        try:
-            render_finance_dashboard(
-                txs,
-                _dec(acc.get("opening_balance")),
-                str(acc.get("currency", "USD")),
-                sb=sb,
-                user_id=str(user["id"]),
-                account_id=str(account_id),
-                account_label=str(acc.get("label") or ""),
-                accounts=accounts,
-            )
-        except Exception as e:
-            st.error("El tablero falló al cargar. Probá recargar la página o revisá los datos.")
-            st.code(str(e))
-        st.divider()
-        st.markdown(
-            '<p class="lk-section">Cotizaciones (referencia)</p>',
-            unsafe_allow_html=True,
-        )
-        _bcv_col, _p2p_intro = st.columns([1, 2])
-        with _bcv_col:
-            render_bcv_reference()
-        with _p2p_intro:
+        with st.expander("🌎 Panorama global · todas las cuentas", expanded=True):
+            try:
+                render_global_accounts_panorama(sb, accounts, load_transactions_for_accounts)
+            except Exception as e:
+                st.warning("El panorama global no pudo cargarse.")
+                st.code(str(e))
+        with st.expander("💳 Saldos por cuenta (todas a la vez)", expanded=True):
             st.caption(
-                "P2P: precios públicos en Binance; BCV: promedio oficial vía API pública. "
-                "No son cotizaciones de contrato."
+                "Saldo calculado (inicial + movimientos). Los **gráficos** abajo usan la **cuenta del lateral**."
             )
-        render_usdt_ves_p2p_reference()
-        st.divider()
-        st.markdown(
-            '<p class="lk-section">Patrimonio en bolívares (todas las cuentas)</p>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Usa la tasa de la barra lateral. Activá el desglose solo si querés total y tabla "
-            "(consulta movimientos de cada cuenta)."
-        )
-        _fx_detail = st.checkbox(
-            "Mostrar desglose por cuenta y total ≈ VES",
-            value=False,
-            key="kf_fx_detail_all",
-            help="Apagado por defecto: evita leer todas las cuentas en cada recarga.",
-        )
-        if _ves_u is not None and _ves_t is not None and _fx_detail:
-            _rows, _tot = all_balances_with_ves(
-                sb, accounts, load_transactions, compute_balance, _ves_u, _ves_t
+            try:
+                _all_bal = all_balances_native(sb, accounts, load_transactions, compute_balance)
+                _render_balances_native_lk_cards(_all_bal)
+            except Exception as e:
+                st.warning("No se pudieron cargar todos los saldos de una vez.")
+                st.code(str(e))
+        with st.expander("📉 Gráficos y metas · cuenta del lateral", expanded=True):
+            try:
+                render_finance_dashboard(
+                    txs,
+                    _dec(acc.get("opening_balance")),
+                    str(acc.get("currency", "USD")),
+                    sb=sb,
+                    user_id=str(user["id"]),
+                    account_id=str(account_id),
+                    account_label=str(acc.get("label") or ""),
+                    accounts=accounts,
+                )
+            except Exception as e:
+                st.error("El tablero falló al cargar. Probá recargar la página o revisá los datos.")
+                st.code(str(e))
+        with st.expander("💱 Cotizaciones de referencia (BCV / P2P)", expanded=False):
+            _bcv_col, _p2p_intro = st.columns([1, 2])
+            with _bcv_col:
+                render_bcv_reference()
+            with _p2p_intro:
+                st.caption(
+                    "P2P: precios públicos en Binance; BCV: promedio oficial vía API pública. "
+                    "No son cotizaciones de contrato."
+                )
+            render_usdt_ves_p2p_reference()
+        with st.expander("🇻🇪 Patrimonio en bolívares (referencia lateral)", expanded=False):
+            st.caption(
+                "Usa la tasa del lateral → **Informes y referencias**. Activá el desglose solo si querés total y tabla."
             )
-            st.metric("Total patrimonio ≈ VES", f"{float(_tot):,.2f}")
-            _render_balances_ves_lk_cards(_rows)
-        elif _ves_u is not None and _ves_t is not None:
-            st.info("Activá el desglose arriba para ver total y tabla por cuenta.")
+            _fx_detail = st.checkbox(
+                "Mostrar desglose por cuenta y total ≈ VES",
+                value=False,
+                key="kf_fx_detail_all",
+                help="Apagado por defecto: evita leer todas las cuentas en cada recarga.",
+            )
+            if _ves_u is not None and _ves_t is not None and _fx_detail:
+                _rows, _tot = all_balances_with_ves(
+                    sb, accounts, load_transactions, compute_balance, _ves_u, _ves_t
+                )
+                st.metric("Total patrimonio ≈ VES", f"{float(_tot):,.2f}")
+                _render_balances_ves_lk_cards(_rows)
+            elif _ves_u is not None and _ves_t is not None:
+                st.info("Activá el desglose arriba para ver total y tabla por cuenta.")
 
     with tab_mov:
         c1, c2, c3, c4 = st.columns(4)
@@ -1910,24 +1901,26 @@ Así el **panorama** te muestra **de qué negocio entra** el dinero y **dónde l
         else:
             c4.metric("Saldo ≈ VES", "—", help="Elegí una tasa válida en la barra lateral.")
 
-        with st.expander("ℹ️ Traspaso vs gasto (tocá para leer)", expanded=False):
+        with st.expander("ℹ️ Ayuda · traspaso vs gasto y cadena Zelle → Bs", expanded=False):
             st.markdown(
-                "**Traspaso** = movés entre **tus** cuentas (USD→USDT→VES). **No cuenta como gasto** del mes.  \n"
-                "**Egreso con rubro** = pagaste algo que **sale** de tu patrimonio (comida, servicios…); **sí es gasto**."
+                "**Traspaso** = entre **tus** cuentas (USD→USDT→VES). **No es gasto** del mes en reportes.  \n"
+                "**Egreso con rubro** = pagás consumo (comida, servicios…); **sí es gasto**."
             )
-        with st.expander("Cómo registrar una cadena (ej. Zelle → Binance → bolívares → pagos)", expanded=False):
+            st.divider()
             st.markdown(
                 """
-1. **Traspaso** Zelle (USD) → Binance (USDT): acá registrás el cambio de caja; elegí origen y destino y el monto que sale/entra.
-2. **Traspaso** Binance (USDT) → cuenta en **bolívares**: otro traspaso; usá tasa P2P si querés que la app calcule lo que entra en VES.
-3. **Egreso** solo cuando **pagás** algo desde la cuenta en bolívares: rubro (Comida, Servicios…). Ahí sí es “gasto”.
+1. **Traspaso** Zelle (USD) → Binance (USDT): cambio de caja; origen, destino y montos.
+2. **Traspaso** USDT → cuenta en **bolívares**: otro traspaso; podés usar **tasa P2P** en el formulario.
+3. **Egreso** cuando **pagás** desde Bs: rubro (Comida, Servicios…).
 
-En **Últimos movimientos** la columna **Naturaleza** te marca **↔ Traspaso**, **↓ Gasto** o **↑ Ingreso**.  
-Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
+En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista en cadena** (módulo traspasos) resume cada traspaso.
                 """
             )
 
-        t1, t2, t3 = st.tabs(["Registrar", "Saldo inicial", "Importar Excel"])
+        with st.expander("➕ Registrar · saldo inicial · importar · exportar", expanded=True):
+            t1, t2, t3 = st.tabs(
+                ["➕ Registrar", "⚖️ Saldo inicial", "📥 Importar Excel"]
+            )
 
         with t1:
             _opt_keys = list(opts.keys())
@@ -2311,7 +2304,7 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
             import_excel_section(sb, account_id, user["id"], user["display_name"])
 
         _today_x = date.today()
-        with st.expander("Exportar Excel · cuenta activa del lateral", expanded=False):
+        with st.expander("📤 Exportar Excel · cuenta del lateral", expanded=False):
             st.caption(
                 "Movimientos de la **cuenta del lateral**, entre las fechas que elijas. "
                 "Los montos van en bruto (número), listos para Excel."
@@ -2335,7 +2328,7 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
                     f"{ex_from}_{ex_to}.xlsx"
                 )
                 st.download_button(
-                    "Descargar .xlsx",
+                    "📥 Descargar .xlsx",
                     data=_df_to_xlsx_bytes(ex_df),
                     file_name=_xfn,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2343,100 +2336,95 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
                     use_container_width=True,
                 )
 
-        st.divider()
-        st.markdown(
-            '<p class="lk-section" style="margin-top:0;">Traspasos registrados</p>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Esta tabla muestra **solo traspasos** (grupo origen + destino), en **todas** tus cuentas. "
-            "Usala para detectar duplicados o errores y luego borrarlos por grupo."
-        )
-        _all_ids = list(opts.keys())
-        _all_txs = load_transactions_for_accounts(sb, _all_ids, limit=16000)
-        _all_transfer_txs = [t for t in _all_txs if _is_transfer_tx(t)]
-        _by_gid_all: dict[str, list[dict[str, Any]]] = {}
-        for _t in _all_transfer_txs:
-            _g = str(_t.get("transfer_group_id") or "").strip()
-            if not _g:
-                continue
-            _by_gid_all.setdefault(_g, []).append(_t)
-        _group_rows = [
-            _transfer_group_row(_g, _rows, opts, accounts)
-            for _g, _rows in _by_gid_all.items()
-            if _rows
-        ]
-        if _group_rows:
-            _df_tr = pd.DataFrame(_group_rows).sort_values("fecha", ascending=False)
-            with st.expander("Vista en cadena (una línea por traspaso, con monedas)", expanded=True):
-                st.caption("Misma información que la tabla de abajo, en formato **origen (moneda) → destino (moneda)**.")
-                for gr in sorted(_group_rows, key=lambda x: str(x.get("fecha") or ""), reverse=True):
-                    st.markdown(
-                        f"- **{gr.get('fecha', '—')}** · `{gr.get('cadena_legible', '—')}` · "
-                        f"_{str(gr.get('descripcion') or '')[:72]}_ · grupo `{gr.get('grupo', '')}`"
+        with st.expander("🔀 Traspasos entre cuentas · resumen y cadena", expanded=True):
+            st.caption(
+                "Solo **traspasos** (grupo origen + destino), **todas** las cuentas. "
+                "Para duplicados o errores; podés borrar por grupo más abajo."
+            )
+            _all_ids = list(opts.keys())
+            _all_txs = load_transactions_for_accounts(sb, _all_ids, limit=16000)
+            _all_transfer_txs = [t for t in _all_txs if _is_transfer_tx(t)]
+            _by_gid_all: dict[str, list[dict[str, Any]]] = {}
+            for _t in _all_transfer_txs:
+                _g = str(_t.get("transfer_group_id") or "").strip()
+                if not _g:
+                    continue
+                _by_gid_all.setdefault(_g, []).append(_t)
+            _group_rows = [
+                _transfer_group_row(_g, _rows, opts, accounts)
+                for _g, _rows in _by_gid_all.items()
+                if _rows
+            ]
+            if _group_rows:
+                _df_tr = pd.DataFrame(_group_rows).sort_values("fecha", ascending=False)
+                with st.expander("🔗 Vista en cadena (una línea por traspaso)", expanded=True):
+                    st.caption(
+                        "Formato **origen (moneda) → destino (moneda)**; misma info que la tabla."
                     )
-            _df_show = _df_tr[
-                [
-                    "fecha",
-                    "origen",
-                    "moneda_origen",
-                    "egreso",
-                    "destino",
-                    "moneda_destino",
-                    "ingreso",
-                    "diferencia",
-                    "descripcion",
-                    "grupo",
-                ]
-            ].copy()
-            _df_show["egreso"] = _df_show["egreso"].map(
-                lambda x: "—" if pd.isna(x) else f"{float(x):,.4f}"
-            )
-            _df_show["ingreso"] = _df_show["ingreso"].map(
-                lambda x: "—" if pd.isna(x) else f"{float(x):,.4f}"
-            )
-            _df_show["diferencia"] = _df_show["diferencia"].map(
-                lambda x: "—" if pd.isna(x) else f"{float(x):+,.4f}"
-            )
-            _df_show = _df_show.rename(
-                columns={
-                    "fecha": "Fecha",
-                    "origen": "Origen",
-                    "moneda_origen": "Mon. origen",
-                    "egreso": "Egresa",
-                    "destino": "Destino",
-                    "moneda_destino": "Mon. destino",
-                    "ingreso": "Ingresa",
-                    "diferencia": "Diferencia",
-                    "descripcion": "Descripción",
-                    "grupo": "Grupo",
-                }
-            )
-            st.dataframe(_df_show, use_container_width=True, hide_index=True)
-        else:
-            st.info("No se encontraron traspasos enlazados con `transfer_group_id`.")
+                    for gr in sorted(_group_rows, key=lambda x: str(x.get("fecha") or ""), reverse=True):
+                        st.markdown(
+                            f"- **{gr.get('fecha', '—')}** · `{gr.get('cadena_legible', '—')}` · "
+                            f"_{str(gr.get('descripcion') or '')[:72]}_ · grupo `{gr.get('grupo', '')}`"
+                        )
+                _df_show = _df_tr[
+                    [
+                        "fecha",
+                        "origen",
+                        "moneda_origen",
+                        "egreso",
+                        "destino",
+                        "moneda_destino",
+                        "ingreso",
+                        "diferencia",
+                        "descripcion",
+                        "grupo",
+                    ]
+                ].copy()
+                _df_show["egreso"] = _df_show["egreso"].map(
+                    lambda x: "—" if pd.isna(x) else f"{float(x):,.4f}"
+                )
+                _df_show["ingreso"] = _df_show["ingreso"].map(
+                    lambda x: "—" if pd.isna(x) else f"{float(x):,.4f}"
+                )
+                _df_show["diferencia"] = _df_show["diferencia"].map(
+                    lambda x: "—" if pd.isna(x) else f"{float(x):+,.4f}"
+                )
+                _df_show = _df_show.rename(
+                    columns={
+                        "fecha": "Fecha",
+                        "origen": "Origen",
+                        "moneda_origen": "Mon. origen",
+                        "egreso": "Egresa",
+                        "destino": "Destino",
+                        "moneda_destino": "Mon. destino",
+                        "ingreso": "Ingresa",
+                        "diferencia": "Diferencia",
+                        "descripcion": "Descripción",
+                        "grupo": "Grupo",
+                    }
+                )
+                st.dataframe(_df_show, use_container_width=True, hide_index=True)
+            else:
+                st.info("No se encontraron traspasos enlazados con `transfer_group_id`.")
 
-        _orphans = [
-            _t for _t in _all_transfer_txs if not str(_t.get("transfer_group_id") or "").strip()
-        ]
-        if _orphans:
-            st.warning(
-                f"Hay **{len(_orphans)}** movimiento(s) marcados como traspaso **sin grupo**. "
-                "Esos no aparecen en la tabla de arriba; podés borrarlos por UUID."
-            )
+            _orphans = [
+                _t for _t in _all_transfer_txs if not str(_t.get("transfer_group_id") or "").strip()
+            ]
+            if _orphans:
+                st.warning(
+                    f"Hay **{len(_orphans)}** movimiento(s) marcados como traspaso **sin grupo**. "
+                    "Esos no aparecen en la tabla de arriba; podés borrarlos por UUID."
+                )
 
-        st.markdown(
-            '<p class="lk-section" style="margin-top:0;">📋 Movimientos de la cuenta</p>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            f"**{acc.get('label', '—')}** · **Naturaleza:** ↔ traspaso · ↓ gasto · ↑ ingreso · "
-            "Orden **fecha reciente primero**. Podés ordenar columnas desde el encabezado."
-        )
-        if not txs:
-            st.write("Todavía no hay movimientos.")
-        else:
-            df = pd.DataFrame(txs)
+        with st.expander("📋 Movimientos de la cuenta · tabla, editar y borrar", expanded=True):
+            st.caption(
+                f"**{acc.get('label', '—')}** · **Naturaleza:** ↔ traspaso · ↓ gasto · ↑ ingreso · "
+                "Orden **fecha reciente primero**. Ordená columnas desde el encabezado."
+            )
+            if not txs:
+                st.write("Todavía no hay movimientos.")
+            else:
+                df = pd.DataFrame(txs)
             df["registró"] = df["user_id"].map(lambda x: umap.get(str(x), "—") if pd.notna(x) else "—")
             for col in (
                 "business",
@@ -2540,7 +2528,7 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
             )
 
             _opt_keys_ed = list(opts.keys())
-            with st.expander("Editar movimiento", expanded=False):
+            with st.expander("✏️ Editar movimiento", expanded=False):
                 st.caption(
                     "Corregí cuenta, tipo, fecha, monto, descripción, rubro/negocio, etiqueta, comisión o notas. "
                     "Quién **registró** no cambia. En **Reportes** podés ver varias cuentas; acá elegí **la cuenta** "
@@ -2721,7 +2709,7 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
                                 st.error("No se pudo guardar.")
                                 st.code(wmsg_ed or "")
 
-            st.markdown("##### Borrar movimientos")
+                st.markdown("##### 🗑 Borrar movimientos")
             st.caption(
                 "Si borrás un **traspaso** por UUID, se eliminan **las dos piernas** (egreso e ingreso) y los saldos se corrigen. "
                 "Traspasos viejos sin `transfer_group_id` en la base hay que borrar **cada pierna** con su UUID (o ejecutá el parche SQL de traspasos)."
@@ -2731,7 +2719,7 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
                 if _rows:
                     _by_gid[_g] = _rows[0]
             if _by_gid:
-                with st.expander("Eliminar traspaso equivocado (todas las cuentas)", expanded=True):
+                with st.expander("🗑 Eliminar traspaso (todas las cuentas)", expanded=True):
                     st.caption(
                         "Aparecen traspasos de **todas las cuentas**. "
                         "Al confirmar se borra **todo el par** en todas las cuentas."
@@ -2780,7 +2768,7 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
         if user.get("is_admin"):
             page_users_admin(sb)
         else:
-            st.info("Solo un administrador puede crear usuarios. Pedile acceso a quien creó el primer usuario.")
+            st.info("🔒 Solo un **administrador** puede crear usuarios. Pedí acceso a quien creó el primer usuario.")
 
 
 if __name__ == "__main__":
