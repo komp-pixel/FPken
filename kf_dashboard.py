@@ -129,30 +129,67 @@ def render_finance_dashboard(
     st.markdown(
         """
         <style>
-        .kf-hero {
-            background: linear-gradient(125deg, #0c1929 0%, #1e3a5f 40%, #0f766e 100%);
-            border-radius: 16px; padding: 1.25rem 1.5rem; margin-bottom: 1rem;
-            border: 1px solid rgba(56, 189, 248, 0.2);
-            box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+        /* Estilo panel tipo Lukana: fondo suave, tarjetas blancas, acento azul */
+        .lk-canvas {
+            background: linear-gradient(165deg, #eef2f9 0%, #e2e8f0 45%, #dce4f0 100%);
+            border-radius: 20px;
+            padding: 1.35rem 1.25rem 1.5rem;
+            margin-bottom: 1.1rem;
+            border: 1px solid #cbd5e1;
+            box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06);
         }
-        .kf-hero h2 { margin: 0; color: #f0f9ff; font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; }
-        .kf-hero p { margin: 0.4rem 0 0 0; color: #94a3b8; font-size: 0.9rem; }
-        .kf-hero .kf-pill {
-            display: inline-block; margin-top: 0.5rem; padding: 0.2rem 0.65rem;
-            background: rgba(56, 189, 248, 0.15); color: #7dd3fc; border-radius: 999px;
-            font-size: 0.75rem; font-weight: 600;
+        .lk-top {
+            display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+            gap: 0.75rem; margin-bottom: 1.15rem;
         }
-        .kf-card {
-            background: linear-gradient(160deg, rgba(30, 58, 95, 0.95) 0%, rgba(13, 33, 55, 0.98) 100%);
-            border: 1px solid rgba(56, 189, 248, 0.22); border-radius: 14px; padding: 1rem 1.15rem;
-            margin-bottom: 0.5rem; box-shadow: 0 8px 28px rgba(0,0,0,0.32);
-            min-height: 108px;
+        .lk-brand { margin: 0; font-size: 1.55rem; font-weight: 800; color: #0f172a; letter-spacing: -0.035em; line-height: 1.15; }
+        .lk-brand em { font-style: normal; color: #2563eb; }
+        .lk-subtitle { margin: 0.35rem 0 0 0; font-size: 0.88rem; color: #64748b; font-weight: 500; }
+        .lk-pill {
+            display: inline-flex; align-items: center; height: 2rem; padding: 0 0.9rem;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff !important;
+            border-radius: 999px; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
         }
-        .kf-card h4 { margin: 0; color: #7dd3fc; font-size: 0.78rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-        .kf-card p { margin: 0.4rem 0 0 0; font-size: 1.45rem; font-weight: 700; color: #f8fafc; line-height: 1.2; }
-        .kf-card .kf-sub { font-size: 0.72rem; color: #94a3b8; margin-top: 0.35rem; font-weight: 400; }
-        .kf-net-pos { color: #4ade80 !important; } .kf-net-neg { color: #fb7185 !important; }
-        .kf-section-title { color: #e2e8f0; font-size: 1.05rem; font-weight: 600; margin: 1rem 0 0.5rem 0; }
+        .lk-grid {
+            display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.85rem;
+        }
+        @media (max-width: 950px) {
+            .lk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        .lk-stat {
+            background: #fff;
+            border-radius: 14px;
+            padding: 1rem 1.05rem;
+            min-height: 102px;
+            border: 1px solid #f1f5f9;
+            box-shadow: 0 2px 12px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+        .lk-stat h4 {
+            margin: 0; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.1em; color: #64748b;
+        }
+        .lk-stat .lk-val { margin: 0.45rem 0 0 0; font-size: 1.32rem; font-weight: 800; color: #0f172a; line-height: 1.15; }
+        .lk-stat .lk-foot { margin: 0.35rem 0 0 0; font-size: 0.72rem; color: #94a3b8; font-weight: 500; }
+        .lk-stat-blue {
+            background: linear-gradient(145deg, #2563eb 0%, #1e40af 100%);
+            border: none;
+            box-shadow: 0 6px 20px rgba(37, 99, 235, 0.35);
+        }
+        .lk-stat-blue h4 { color: rgba(255,255,255,0.88); }
+        .lk-stat-blue .lk-val { color: #fff !important; }
+        .lk-stat-blue .lk-foot { color: rgba(255,255,255,0.82); }
+        .lk-pos { color: #16a34a !important; }
+        .lk-neg { color: #dc2626 !important; }
+        .lk-section {
+            font-size: 1.02rem; font-weight: 800; color: #0f172a;
+            margin: 1.15rem 0 0.5rem 0;
+            padding-bottom: 0.4rem;
+            border-bottom: 3px solid #2563eb;
+            display: inline-block;
+            letter-spacing: -0.02em;
+        }
+        .lk-hint { font-size: 0.82rem; color: #64748b; margin-top: 0.35rem; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -218,42 +255,33 @@ def render_finance_dashboard(
     net = float(ing) - float(egr)
 
     _lbl = account_label or "Cuenta activa"
+    bal = float(opening_balance) + float(
+        df[df["tx_type"] == "ingreso"]["amount"].sum()
+        - df[df["tx_type"] == "egreso"]["amount"].sum()
+    )
+    _net_cls = "lk-pos" if net >= 0 else "lk-neg"
     st.markdown(
-        f'<div class="kf-hero"><h2>Tablero financiero</h2><p>{_lbl}</p>'
-        f'<span class="kf-pill">Moneda · {currency}</span></div>',
+        f'<div class="lk-canvas">'
+        f'<div class="lk-top">'
+        f'<div><p class="lk-brand">Kenny <em>Finanzas</em></p>'
+        f'<p class="lk-subtitle">{_lbl}</p></div>'
+        f'<span class="lk-pill">{currency}</span></div>'
+        f'<div class="lk-grid">'
+        f'<div class="lk-stat"><h4>Ingresos</h4>'
+        f'<p class="lk-val">{float(ing):,.2f} {currency}</p>'
+        f'<p class="lk-foot">Período seleccionado</p></div>'
+        f'<div class="lk-stat"><h4>Egresos</h4>'
+        f'<p class="lk-val">{float(egr):,.2f} {currency}</p>'
+        f'<p class="lk-foot">Flujo real</p></div>'
+        f'<div class="lk-stat"><h4>Neto</h4>'
+        f'<p class="lk-val {_net_cls}">{net:,.2f} {currency}</p>'
+        f'<p class="lk-foot">Ingresos − egresos</p></div>'
+        f'<div class="lk-stat lk-stat-blue"><h4>Saldo proyectado</h4>'
+        f'<p class="lk-val">{bal:,.2f} {currency}</p>'
+        f'<p class="lk-foot">Saldo inicial + movimientos</p></div>'
+        f"</div></div>",
         unsafe_allow_html=True,
     )
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.markdown(
-            f'<div class="kf-card"><h4>↑ Ingresos</h4><p>{float(ing):,.2f} {currency}</p>'
-            f'<div class="kf-sub">En el período filtrado</div></div>',
-            unsafe_allow_html=True,
-        )
-    with c2:
-        st.markdown(
-            f'<div class="kf-card"><h4>↓ Egresos</h4><p>{float(egr):,.2f} {currency}</p>'
-            f'<div class="kf-sub">Flujo real</div></div>',
-            unsafe_allow_html=True,
-        )
-    with c3:
-        cls = "kf-net-pos" if net >= 0 else "kf-net-neg"
-        st.markdown(
-            f'<div class="kf-card"><h4>◆ Neto</h4><p class="{cls}">{net:,.2f} {currency}</p>'
-            f'<div class="kf-sub">Ingresos − egresos</div></div>',
-            unsafe_allow_html=True,
-        )
-    with c4:
-        bal = float(opening_balance) + float(
-            df[df["tx_type"] == "ingreso"]["amount"].sum()
-            - df[df["tx_type"] == "egreso"]["amount"].sum()
-        )
-        st.markdown(
-            f'<div class="kf-card"><h4>Saldo proyectado</h4><p>{bal:,.2f} {currency}</p>'
-            f'<div class="kf-sub">Saldo inicial + movimientos</div></div>',
-            unsafe_allow_html=True,
-        )
 
     if float(ing) > 0:
         st.caption(
@@ -303,7 +331,10 @@ def render_finance_dashboard(
                 return None
             return f"{((new_v - old_v) / abs(old_v) * 100):+.1f}% vs mes ant."
 
-        st.markdown('<p class="kf-section-title">Mes en curso vs anterior</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<p class="lk-section">Mes en curso vs mes anterior</p>',
+            unsafe_allow_html=True,
+        )
         st.caption(
             f"{first_m.isoformat()} → {today.isoformat()} · comparado con "
             f"{first_pm.isoformat()} → {last_pm.isoformat()}"
@@ -332,7 +363,11 @@ def render_finance_dashboard(
             )
 
     st.divider()
-    st.markdown('<p class="kf-section-title">Metas y cumplimiento (mes calendario)</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="lk-section">Metas y cumplimiento</p>'
+        '<p class="lk-hint">Mes calendario · misma moneda que la cuenta del lateral</p>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         "Aplica a la **cuenta del lateral** y su moneda. Ejecutá **`patch_009_goals_budgets.sql`** en Supabase si no cargan las metas."
     )
@@ -554,13 +589,14 @@ def render_finance_dashboard(
     )
 
     layout = dict(
-        template="plotly_dark",
+        template="plotly_white",
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(14,23,42,0.55)",
-        font=dict(color="#e2e8f0"),
-        margin=dict(l=40, r=20, t=48, b=40),
+        plot_bgcolor="#f8fafc",
+        font=dict(color="#334155", family="system-ui, -apple-system, sans-serif", size=13),
+        margin=dict(l=48, r=28, t=52, b=44),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
+    _axis_style = dict(gridcolor="#e2e8f0", linecolor="#cbd5e1", showgrid=True)
 
     with tab_met:
         st.caption(
@@ -585,16 +621,17 @@ def render_finance_dashboard(
             sps = [float(sg_spent.get(c, 0) or 0) for c in cats]
             fig_b = go.Figure()
             fig_b.add_trace(
-                go.Bar(name="Gastado", y=cats, x=sps, orientation="h", marker_color="#fb7185")
+                go.Bar(name="Gastado", y=cats, x=sps, orientation="h", marker_color="#f97316")
             )
             fig_b.add_trace(
-                go.Bar(name="Tope", y=cats, x=lims, orientation="h", marker_color="rgba(56,189,248,0.35)")
+                go.Bar(name="Tope", y=cats, x=lims, orientation="h", marker_color="#93c5fd")
             )
             fig_b.update_layout(
                 **layout,
-                title="Presupuesto vs gastado (mes en curso)",
+                title="Presupuesto vs gastado",
                 barmode="group",
-                xaxis_title=currency,
+                xaxis=dict(title=currency, **_axis_style),
+                yaxis=dict(**_axis_style),
             )
             st.plotly_chart(fig_b, use_container_width=True)
         else:
@@ -613,11 +650,14 @@ def render_finance_dashboard(
                 go.Bar(
                     x=["Ahorro del mes", "Meta"],
                     y=[max(0, net_tab), target_save],
-                    marker_color=["#34d399", "#38bdf8"],
+                    marker_color=["#22c55e", "#2563eb"],
                 )
             )
             fig_g.update_layout(
-                **layout, title=f"Ahorro vs meta ({goal_ym})", yaxis_title=currency
+                **layout,
+                title=f"Ahorro vs meta ({goal_ym})",
+                xaxis=dict(**_axis_style),
+                yaxis=dict(title=currency, **_axis_style),
             )
             st.plotly_chart(fig_g, use_container_width=True)
 
@@ -633,7 +673,7 @@ def render_finance_dashboard(
                         labels=["Ingresos", "Egresos"],
                         values=[float(ing), float(egr)],
                         hole=0.5,
-                        marker=dict(colors=["#34d399", "#fb7185"], line=dict(color="#0f172a", width=2)),
+                        marker=dict(colors=["#22c55e", "#f97316"], line=dict(color="#fff", width=2)),
                         textinfo="label+percent",
                     )
                 ]
@@ -705,17 +745,17 @@ def render_finance_dashboard(
     with tab_d:
         fig_d = go.Figure()
         fig_d.add_trace(
-            go.Bar(x=daily["tx_date"], y=daily["ingreso"], name="Ingresos", marker_color="#34d399")
+            go.Bar(x=daily["tx_date"], y=daily["ingreso"], name="Ingresos", marker_color="#22c55e")
         )
         fig_d.add_trace(
-            go.Bar(x=daily["tx_date"], y=daily["egreso"], name="Egresos", marker_color="#fb7185")
+            go.Bar(x=daily["tx_date"], y=daily["egreso"], name="Egresos", marker_color="#f97316")
         )
         fig_d.update_layout(
             **layout,
             title="Flujo por día",
             barmode="group",
-            xaxis_title="Fecha",
-            yaxis_title=currency,
+            xaxis=dict(title="Fecha", **_axis_style),
+            yaxis=dict(title=currency, **_axis_style),
         )
         st.plotly_chart(fig_d, use_container_width=True)
 
@@ -726,21 +766,33 @@ def render_finance_dashboard(
                 y=daily["neto"].cumsum(),
                 fill="tozeroy",
                 name="Neto acumulado",
-                line=dict(color="#38bdf8", width=2),
+                line=dict(color="#2563eb", width=2),
+                fillcolor="rgba(37, 99, 235, 0.12)",
             )
         )
-        fig_line.update_layout(**layout, title="Neto acumulado en el período", yaxis_title=currency)
+        fig_line.update_layout(
+            **layout,
+            title="Neto acumulado en el período",
+            xaxis=dict(**_axis_style),
+            yaxis=dict(title=currency, **_axis_style),
+        )
         st.plotly_chart(fig_line, use_container_width=True)
 
     with tab_m:
         fig_m = go.Figure()
         fig_m.add_trace(
-            go.Bar(x=monthly["ym"], y=monthly["ingreso"], name="Ingresos", marker_color="#4ade80")
+            go.Bar(x=monthly["ym"], y=monthly["ingreso"], name="Ingresos", marker_color="#22c55e")
         )
         fig_m.add_trace(
-            go.Bar(x=monthly["ym"], y=monthly["egreso"], name="Egresos", marker_color="#f87171")
+            go.Bar(x=monthly["ym"], y=monthly["egreso"], name="Egresos", marker_color="#f97316")
         )
-        fig_m.update_layout(**layout, title="Por mes", barmode="group")
+        fig_m.update_layout(
+            **layout,
+            title="Por mes",
+            barmode="group",
+            xaxis=dict(**_axis_style),
+            yaxis=dict(title=currency, **_axis_style),
+        )
         st.plotly_chart(fig_m, use_container_width=True)
 
     with tab_y:
@@ -750,7 +802,13 @@ def render_finance_dashboard(
                 go.Bar(name="Egresos", x=yearly["yr"], y=yearly["egreso"], marker_color="#ef4444"),
             ]
         )
-        fig_y.update_layout(**layout, title="Por año", barmode="group")
+        fig_y.update_layout(
+            **layout,
+            title="Por año",
+            barmode="group",
+            xaxis=dict(**_axis_style),
+            yaxis=dict(title=currency, **_axis_style),
+        )
         st.plotly_chart(fig_y, use_container_width=True)
 
     with tab_neg:
@@ -788,7 +846,8 @@ def render_finance_dashboard(
             fig_n.update_layout(
                 **layout,
                 title="Ingresos por negocio",
-                xaxis_title=currency,
+                xaxis=dict(title=currency, **_axis_style),
+                yaxis=dict(**_axis_style),
             )
             st.plotly_chart(fig_n, use_container_width=True)
 
@@ -825,6 +884,7 @@ def render_finance_dashboard(
             fig_c.update_layout(
                 **layout,
                 title="Gastos por categoría",
-                xaxis_title=currency,
+                xaxis=dict(title=currency, **_axis_style),
+                yaxis=dict(**_axis_style),
             )
             st.plotly_chart(fig_c, use_container_width=True)
