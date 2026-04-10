@@ -1053,29 +1053,104 @@ def txs_to_dataframe_with_accounts(
     return out
 
 
+def _traspaso_pairs_for_panorama(dff_tr: pd.DataFrame) -> pd.DataFrame:
+    """Tabla legible origen → destino; `dff_tr` ya filtrada a movimientos tipo traspaso."""
+    if dff_tr.empty:
+        return pd.DataFrame(
+            columns=[
+                "Fecha",
+                "Origen",
+                "M. origen",
+                "Sale",
+                "Destino",
+                "M. destino",
+                "Entra",
+                "Descripción",
+                "Nota",
+            ]
+        )
+    rows: list[dict[str, Any]] = []
+    dc = dff_tr.copy()
+    dc["_gid"] = dc["transfer_group_id"].fillna("").astype(str).str.strip()
+    paired = dc[dc["_gid"] != ""]
+    for _gid, g in paired.groupby("_gid", sort=False):
+        g = g.sort_values("tx_date")
+        dt = g["tx_date"].min()
+        eg = g[g["tx_type"] == "egreso"]
+        inn = g[g["tx_type"] == "ingreso"]
+        o_lab = str(eg.iloc[0]["account_label"]) if len(eg) else "—"
+        o_cur = str(eg.iloc[0]["currency"]) if len(eg) else "—"
+        d_lab = str(inn.iloc[0]["account_label"]) if len(inn) else "—"
+        d_cur = str(inn.iloc[0]["currency"]) if len(inn) else "—"
+        a_out = float(eg.iloc[0]["amount"]) if len(eg) else float("nan")
+        a_in = float(inn.iloc[0]["amount"]) if len(inn) else float("nan")
+        d1 = str(eg.iloc[0].get("description") or "") if len(eg) else ""
+        d2 = str(inn.iloc[0].get("description") or "") if len(inn) else ""
+        desc = (d1 or d2)[:140]
+        rows.append(
+            {
+                "Fecha": dt,
+                "Origen": o_lab,
+                "M. origen": o_cur,
+                "Sale": a_out,
+                "Destino": d_lab,
+                "M. destino": d_cur,
+                "Entra": a_in,
+                "Descripción": desc,
+                "Nota": "",
+            }
+        )
+    orphans = dc[dc["_gid"] == ""]
+    for _, r in orphans.iterrows():
+        tt = str(r.get("tx_type") or "")
+        rows.append(
+            {
+                "Fecha": r["tx_date"],
+                "Origen": str(r["account_label"]) if tt == "egreso" else "—",
+                "M. origen": str(r["currency"]) if tt == "egreso" else "—",
+                "Sale": float(r["amount"]) if tt == "egreso" else float("nan"),
+                "Destino": str(r["account_label"]) if tt == "ingreso" else "—",
+                "M. destino": str(r["currency"]) if tt == "ingreso" else "—",
+                "Entra": float(r["amount"]) if tt == "ingreso" else float("nan"),
+                "Descripción": str(r.get("description") or "")[:140],
+                "Nota": "Sin ID de grupo (una pierna)",
+            }
+        )
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    return out.sort_values("Fecha", ascending=False).reset_index(drop=True)
+
+
 def render_global_accounts_panorama(
     sb: Client,
     accounts: list[dict[str, Any]],
     load_transactions_for_accounts_fn: Any,
 ) -> None:
     """
-    Vista centrada en **todas** las cuentas: ingresos por negocio, egresos por rubro,
-    y totales por cuenta, **por moneda** (no mezcla USD con Bs).
+    Panorama por moneda: ingresos **negocio → cuenta**, egresos **cuenta → rubro**;
+    traspasos en bloque aparte; resumen por cuenta opcional.
     """
     st.markdown(
         '<p class="lk-section" style="margin-top:0;">🌎 Panorama de todas las cuentas</p>',
         unsafe_allow_html=True,
     )
     st.caption(
-        "Unificá acá **de qué negocio entra** el dinero, **en qué rubro gastás** y **desde qué cuenta**, "
-        "sin mezclar monedas. Los traspasos (Zelle→USDT→Bs) podés ocultarlos para ver solo flujo real."
+        "**Entradas:** de qué negocio cae el dinero y **en qué cuenta**. "
+        "**Salidas:** de qué cuenta sale y **en qué rubro** gastás. "
+        "Los **traspasos** van aparte (no mezclarlos con negocio/gasto real)."
     )
     today = date.today()
     exclude_transfers = st.checkbox(
-        "Excluir traspasos (solo ingresos/egresos reales, no movimientos entre tus cuentas)",
+        "Excluir traspasos del análisis de ingresos/egresos (recomendado)",
         value=True,
         key="gpan_ex_tr",
-        help="Recomendado para ver negocios y gastos; los traspasos igual figuran en saldos.",
+        help="Si está marcado, las tablas de negocio y rubro no cuentan movimientos entre tus cuentas.",
+    )
+    show_pct = st.checkbox(
+        "Mostrar porcentajes en las tablas",
+        value=False,
+        key="gpan_show_pct",
     )
     range_key = st.selectbox(
         "Período del panorama",
@@ -1130,97 +1205,128 @@ def render_global_accounts_panorama(
     else:
         dff_flow = dff.copy()
 
-    if dff_flow.empty:
-        st.info("No hay movimientos en el período (o solo traspasos si los excluiste).")
+    if dff.empty:
+        st.info("No hay movimientos en el período seleccionado.")
         return
 
-    currencies = sorted(
-        {str(c) for c in dff_flow["currency"].dropna().unique() if str(c).strip()},
-        key=lambda x: (x != "USD", x != "USDT", x),
-    )
-    for cur in currencies:
-        sub = dff_flow[dff_flow["currency"] == cur]
-        if sub.empty:
-            continue
-        ing = sub[sub["tx_type"] == "ingreso"]["amount"].sum()
-        egr = sub[sub["tx_type"] == "egreso"]["amount"].sum()
-        net = float(ing) - float(egr)
-        st.markdown(
-            f'<p class="lk-panel-h">Moneda {html.escape(cur)}</p>',
-            unsafe_allow_html=True,
+    if dff_flow.empty:
+        st.info(
+            "No hay **ingresos ni egresos “reales”** en este período "
+            "(solo traspasos entre cuentas, o nada). Revisá la sección **Traspasos** abajo."
         )
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Ingresos (flujo)", f"{float(ing):,.2f}")
-        m2.metric("Egresos (flujo)", f"{float(egr):,.2f}")
-        m3.metric("Neto", f"{net:,.2f}")
-        cleft, cright = st.columns(2)
-        with cleft:
-            st.markdown("**Ingresos por negocio / fuente**")
+    else:
+        currencies = sorted(
+            {str(c) for c in dff_flow["currency"].dropna().unique() if str(c).strip()},
+            key=lambda x: (x != "USD", x != "USDT", x),
+        )
+        for cur in currencies:
+            sub = dff_flow[dff_flow["currency"] == cur]
+            if sub.empty:
+                continue
+            ing = sub[sub["tx_type"] == "ingreso"]["amount"].sum()
+            egr = sub[sub["tx_type"] == "egreso"]["amount"].sum()
+            net = float(ing) - float(egr)
+            st.markdown(
+                f'<p class="lk-panel-h">Moneda {html.escape(cur)}</p>',
+                unsafe_allow_html=True,
+            )
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Ingresos (sin traspasos)", f"{float(ing):,.2f}")
+            m2.metric("Egresos (sin traspasos)", f"{float(egr):,.2f}")
+            m3.metric("Neto", f"{net:,.2f}")
+
+            st.markdown("**Entradas** — negocio / fuente → **cuenta donde cae el dinero**")
             ing_df = sub[sub["tx_type"] == "ingreso"].copy()
             ing_df["business"] = ing_df["business"].fillna("(sin negocio)")
             if ing_df.empty:
-                st.caption("Sin ingresos en este período.")
+                st.caption("Sin ingresos en esta moneda en el período.")
             else:
                 agn = (
-                    ing_df.groupby("business", as_index=False)["amount"]
+                    ing_df.groupby(["business", "account_label"], as_index=False)["amount"]
                     .sum()
                     .sort_values("amount", ascending=False)
                 )
-                tot_i = float(agn["amount"].sum()) or 1.0
-                agn["pct"] = agn["amount"] / tot_i * 100.0
-                st.dataframe(
-                    agn.rename(
-                        columns={
-                            "business": "Negocio / fuente",
-                            "amount": "Total",
-                            "pct": "% del total",
-                        }
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
+                agn = agn.rename(
+                    columns={
+                        "business": "Negocio / fuente",
+                        "account_label": "Cuenta donde entra",
+                        "amount": f"Total ({cur})",
+                    }
                 )
-        with cright:
-            st.markdown("**Egresos por rubro**")
+                if show_pct:
+                    tot_i = float(ing_df["amount"].sum()) or 1.0
+                    agn["% del total ingresos"] = (agn[f"Total ({cur})"] / tot_i * 100.0).map(
+                        lambda x: f"{x:.1f} %"
+                    )
+                st.dataframe(agn, use_container_width=True, hide_index=True)
+
+            st.markdown("**Salidas** — **cuenta de la que sale** → rubro / en qué gastás")
             eg_df = sub[sub["tx_type"] == "egreso"].copy()
             eg_df["category"] = eg_df["category"].fillna("(sin categoría)")
             if eg_df.empty:
-                st.caption("Sin egresos en este período.")
+                st.caption("Sin egresos en esta moneda en el período.")
             else:
                 agc = (
-                    eg_df.groupby("category", as_index=False)["amount"]
+                    eg_df.groupby(["account_label", "category"], as_index=False)["amount"]
                     .sum()
                     .sort_values("amount", ascending=False)
                 )
-                tot_e = float(agc["amount"].sum()) or 1.0
-                agc["pct"] = agc["amount"] / tot_e * 100.0
-                st.dataframe(
-                    agc.rename(
-                        columns={
-                            "category": "Rubro",
-                            "amount": "Total",
-                            "pct": "% del total",
+                agc = agc.rename(
+                    columns={
+                        "account_label": "Cuenta de la que sale",
+                        "category": "Rubro / gasto",
+                        "amount": f"Total ({cur})",
+                    }
+                )
+                if show_pct:
+                    tot_e = float(eg_df["amount"].sum()) or 1.0
+                    agc["% del total egresos"] = (agc[f"Total ({cur})"] / tot_e * 100.0).map(
+                        lambda x: f"{x:.1f} %"
+                    )
+                st.dataframe(agc, use_container_width=True, hide_index=True)
+
+            with st.expander(f"📎 Resumen por cuenta · {cur} (opcional)", expanded=False):
+                st.caption("Mismos totales que arriba, solo agrupados por cuenta.")
+                rows_pa: list[dict[str, Any]] = []
+                for lab in sorted(sub["account_label"].unique(), key=str):
+                    s2 = sub[sub["account_label"] == lab]
+                    i2 = float(s2[s2["tx_type"] == "ingreso"]["amount"].sum())
+                    e2 = float(s2[s2["tx_type"] == "egreso"]["amount"].sum())
+                    rows_pa.append(
+                        {
+                            "Cuenta": lab,
+                            "Ingresos": i2,
+                            "Egresos": e2,
+                            "Neto": i2 - e2,
                         }
-                    ),
+                    )
+                st.dataframe(
+                    pd.DataFrame(rows_pa),
                     use_container_width=True,
                     hide_index=True,
                 )
-        st.markdown("**Por cuenta** (misma moneda)")
-        rows_pa: list[dict[str, Any]] = []
-        for lab in sorted(sub["account_label"].unique(), key=str):
-            s2 = sub[sub["account_label"] == lab]
-            i2 = float(s2[s2["tx_type"] == "ingreso"]["amount"].sum())
-            e2 = float(s2[s2["tx_type"] == "egreso"]["amount"].sum())
-            rows_pa.append(
-                {
-                    "Cuenta": lab,
-                    "Ingresos": i2,
-                    "Egresos": e2,
-                    "Neto": i2 - e2,
-                }
+            st.divider()
+
+    tr_all = dff.loc[_is_transfer_like_df(dff)].copy()
+    if tr_all.empty:
+        st.caption("No hay movimientos marcados como traspaso en este período.")
+    else:
+        ttab = _traspaso_pairs_for_panorama(tr_all)
+        with st.expander(
+            f"🔄 Traspasos en el período · {len(ttab)} fila(s)",
+            expanded=False,
+        ):
+            st.caption(
+                "Cambios de **caja entre tus cuentas** (misma moneda o cruzada). "
+                "No son ingreso de negocio ni gasto con rubro."
             )
-        st.dataframe(
-            pd.DataFrame(rows_pa),
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.divider()
+            if ttab.empty:
+                st.write("—")
+            else:
+                disp = ttab.copy()
+                for col in ("Sale", "Entra"):
+                    if col in disp.columns:
+                        disp[col] = disp[col].apply(
+                            lambda x: f"{float(x):,.2f}" if pd.notna(x) else "—"
+                        )
+                st.dataframe(disp, use_container_width=True, hide_index=True)
