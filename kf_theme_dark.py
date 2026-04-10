@@ -220,14 +220,71 @@ div[data-testid="stAlert"] [data-testid="stMarkdownContainer"] span {
 .main .block-container [data-testid="stMarkdownContainer"] strong {
     color: #f8fafc !important;
 }
+/* Pestañas principales — más aire, texto grande, activa en cyan que resalta */
+[data-testid="stTabs"] [data-baseweb="tab-list"],
 .stTabs [data-baseweb="tab-list"] {
-    gap: 0.35rem;
-    background-color: rgba(30, 41, 59, 0.85);
-    border-radius: 12px;
-    padding: 0.35rem 0.5rem;
-    border: 1px solid #334155;
+    gap: 0.65rem !important;
+    row-gap: 0.5rem !important;
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.9) 100%) !important;
+    border-radius: 14px !important;
+    padding: 0.55rem 0.65rem !important;
+    border: 1px solid #475569 !important;
+    flex-wrap: wrap !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
-.stTabs [data-baseweb="tab"] { border-radius: 8px; font-weight: 600; color: #cbd5e1 !important; }
+[data-testid="stTabs"] [data-baseweb="tab"],
+.stTabs [data-baseweb="tab"] {
+    border-radius: 10px !important;
+    font-weight: 700 !important;
+    font-size: 1.05rem !important;
+    line-height: 1.35 !important;
+    letter-spacing: 0.02em !important;
+    padding: 0.5rem 1rem !important;
+    min-height: 2.85rem !important;
+    margin: 0 !important;
+    color: #cbd5e1 !important;
+    background-color: rgba(15, 23, 42, 0.75) !important;
+    border: 1px solid #334155 !important;
+    -webkit-text-fill-color: #cbd5e1 !important;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+[data-testid="stTabs"] [data-baseweb="tab"] p,
+[data-testid="stTabs"] [data-baseweb="tab"] span,
+.stTabs [data-baseweb="tab"] p,
+.stTabs [data-baseweb="tab"] span {
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"]:hover,
+.stTabs [data-baseweb="tab"]:hover {
+    color: #f1f5f9 !important;
+    background-color: rgba(51, 65, 85, 0.95) !important;
+    border-color: #64748b !important;
+    -webkit-text-fill-color: #f1f5f9 !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"],
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    color: #0f172a !important;
+    background: linear-gradient(135deg, #22d3ee 0%, #38bdf8 45%, #818cf8 100%) !important;
+    border-color: #67e8f9 !important;
+    box-shadow: 0 0 0 1px rgba(103, 232, 249, 0.45), 0 6px 20px rgba(56, 189, 248, 0.28) !important;
+    -webkit-text-fill-color: #0f172a !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] p,
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] span,
+.stTabs [data-baseweb="tab"][aria-selected="true"] p,
+.stTabs [data-baseweb="tab"][aria-selected="true"] span {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+    font-weight: 800 !important;
+}
+/* Línea inferior por defecto de Base Web (evita doble “subrayado” con el pill) */
+[data-testid="stTabs"] [data-baseweb="tab-border"],
+.stTabs [data-baseweb="tab-border"] {
+    display: none !important;
+}
 div[data-testid="stMetric"] {
     background: #0f172a !important;
     border: 1px solid #334155;

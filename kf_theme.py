@@ -278,17 +278,69 @@ div[data-testid="stAlert"] [data-testid="stMarkdownContainer"] span {
 .main .block-container [data-testid="stMarkdownContainer"] strong {
     color: #0f172a !important;
 }
-/* Pestañas principales */
+/* Pestañas principales — espacio, tamaño y activa en azul vivo */
+[data-testid="stTabs"] [data-baseweb="tab-list"],
 .stTabs [data-baseweb="tab-list"] {
-    gap: 0.35rem;
-    background-color: rgba(255, 255, 255, 0.65);
-    border-radius: 12px;
-    padding: 0.35rem 0.5rem;
-    border: 1px solid #e2e8f0;
+    gap: 0.65rem !important;
+    row-gap: 0.5rem !important;
+    background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%) !important;
+    border-radius: 14px !important;
+    padding: 0.55rem 0.65rem !important;
+    border: 1px solid #cbd5e1 !important;
+    flex-wrap: wrap !important;
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.06);
 }
+[data-testid="stTabs"] [data-baseweb="tab"],
 .stTabs [data-baseweb="tab"] {
-    border-radius: 8px;
-    font-weight: 600;
+    border-radius: 10px !important;
+    font-weight: 700 !important;
+    font-size: 1.05rem !important;
+    line-height: 1.35 !important;
+    letter-spacing: 0.02em !important;
+    padding: 0.5rem 1rem !important;
+    min-height: 2.85rem !important;
+    margin: 0 !important;
+    color: #475569 !important;
+    background-color: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    -webkit-text-fill-color: #475569 !important;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+[data-testid="stTabs"] [data-baseweb="tab"] p,
+[data-testid="stTabs"] [data-baseweb="tab"] span,
+.stTabs [data-baseweb="tab"] p,
+.stTabs [data-baseweb="tab"] span {
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"]:hover,
+.stTabs [data-baseweb="tab"]:hover {
+    color: #1e293b !important;
+    background-color: #e2e8f0 !important;
+    border-color: #94a3b8 !important;
+    -webkit-text-fill-color: #1e293b !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"],
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    color: #ffffff !important;
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #0ea5e9 100%) !important;
+    border-color: #60a5fa !important;
+    box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.5), 0 6px 18px rgba(37, 99, 235, 0.28) !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] p,
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] span,
+.stTabs [data-baseweb="tab"][aria-selected="true"] p,
+.stTabs [data-baseweb="tab"][aria-selected="true"] span {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-weight: 800 !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab-border"],
+.stTabs [data-baseweb="tab-border"] {
+    display: none !important;
 }
 /* Métricas tipo tarjeta + valor SIEMPRE oscuro (Streamlit a veces deja el número casi blanco) */
 div[data-testid="stMetric"] {
