@@ -243,6 +243,38 @@ def _analyze_flow_by_currency(
             for name, val in sorted(bus.items(), key=lambda x: -x[1])
         ]
 
+        pair_nc: dict[tuple[str, str], float] = defaultdict(float)
+        for t in b["ing_items"]:
+            aid = str(t.get("account_id", ""))
+            lab = str(amap.get(aid, {}).get("label", "—"))
+            neg = str(t.get("business") or "").strip() or "(sin negocio)"
+            pair_nc[(neg, lab)] += float(t.get("amount") or 0)
+        neg_cuenta_rows = [
+            {
+                "negocio": a,
+                "cuenta": c,
+                "total": v,
+                "pct": (v / ing * 100.0) if ing > 0 else 0.0,
+            }
+            for (a, c), v in sorted(pair_nc.items(), key=lambda x: -x[1])
+        ]
+
+        pair_cr: dict[tuple[str, str], float] = defaultdict(float)
+        for t in b["egr_items"]:
+            aid = str(t.get("account_id", ""))
+            lab = str(amap.get(aid, {}).get("label", "—"))
+            cat = str(t.get("category") or "").strip() or "(sin categoría)"
+            pair_cr[(lab, cat)] += float(t.get("amount") or 0)
+        cuenta_rubro_rows = [
+            {
+                "cuenta": c,
+                "rubro": r,
+                "total": v,
+                "pct": (v / egr * 100.0) if egr > 0 else 0.0,
+            }
+            for (c, r), v in sorted(pair_cr.items(), key=lambda x: -x[1])
+        ]
+
         out.append(
             {
                 "currency": cur,
@@ -252,6 +284,8 @@ def _analyze_flow_by_currency(
                 "pct_gasto_sobre_ingreso": pct_gasto,
                 "rubros": rub_rows,
                 "negocios": bus_rows,
+                "ingreso_negocio_cuenta": neg_cuenta_rows,
+                "egreso_cuenta_rubro": cuenta_rubro_rows,
             }
         )
     return out
@@ -627,11 +661,11 @@ def _build_pdf_bytes(
         story.append(t_cmp)
         story.append(Spacer(1, 10))
     if analysis_by_currency:
-        story.append(Paragraph("<b>Análisis por moneda (peso de rubros y negocios)</b>", styles["Heading2"]))
+        story.append(Paragraph("<b>Análisis por moneda</b>", styles["Heading2"]))
         story.append(
             Paragraph(
-                "<i>% gasto = egresos ÷ ingresos del período en esa moneda. Los porcentajes de rubro son sobre el total "
-                "de egresos; los de negocio sobre el total de ingresos.</i>",
+                "<i>Primero: flujo narrativo (negocio→cuenta y cuenta→rubro). Luego tablas solo por rubro o solo por "
+                "negocio (útiles para tortas). % gasto = egresos ÷ ingresos en esa moneda.</i>",
                 styles["Normal"],
             )
         )
@@ -666,9 +700,89 @@ def _build_pdf_bytes(
             )
             story.append(sum_a)
             story.append(Spacer(1, 6))
+            ncx = block.get("ingreso_negocio_cuenta") or []
+            if ncx:
+                story.append(
+                    Paragraph(
+                        "<b>Ingresos: negocio → cuenta donde entra</b>",
+                        styles["Heading2"],
+                    )
+                )
+                story.append(
+                    Paragraph(
+                        "<i>Misma lógica que el Panorama global del Dashboard.</i>",
+                        styles["Normal"],
+                    )
+                )
+                story.append(Spacer(1, 4))
+                nc_tbl = [
+                    ["Negocio / fuente", "Cuenta donde entra", "Total", "% del total ingresos"],
+                ]
+                for r in ncx[:45]:
+                    nc_tbl.append(
+                        [
+                            _pdf_safe_line(str(r.get("negocio", "")))[:28],
+                            _pdf_safe_line(str(r.get("cuenta", "")))[:28],
+                            f'{float(r.get("total") or 0):,.2f}',
+                            f'{float(r.get("pct") or 0):.1f} %',
+                        ]
+                    )
+                t_nc = Table(nc_tbl, colWidths=[150, 150, 72, 88])
+                t_nc.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#134e4a")),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                            ("FONTSIZE", (0, 0), (-1, -1), 7),
+                            ("GRID", (0, 0), (-1, -1), 0.15, colors.grey),
+                        ]
+                    )
+                )
+                story.append(t_nc)
+                story.append(Spacer(1, 6))
+            ecx = block.get("egreso_cuenta_rubro") or []
+            if ecx:
+                story.append(
+                    Paragraph(
+                        "<b>Egresos: cuenta de la que sale → rubro</b>",
+                        styles["Heading2"],
+                    )
+                )
+                story.append(
+                    Paragraph(
+                        "<i>Qué cuenta pagó y en qué rubro quedó clasificado el gasto.</i>",
+                        styles["Normal"],
+                    )
+                )
+                story.append(Spacer(1, 4))
+                ec_tbl = [
+                    ["Cuenta de la que sale", "Rubro / gasto", "Total", "% del total egresos"],
+                ]
+                for r in ecx[:45]:
+                    ec_tbl.append(
+                        [
+                            _pdf_safe_line(str(r.get("cuenta", "")))[:28],
+                            _pdf_safe_line(str(r.get("rubro", "")))[:28],
+                            f'{float(r.get("total") or 0):,.2f}',
+                            f'{float(r.get("pct") or 0):.1f} %',
+                        ]
+                    )
+                t_ec = Table(ec_tbl, colWidths=[150, 150, 72, 88])
+                t_ec.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#7f1d1d")),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                            ("FONTSIZE", (0, 0), (-1, -1), 7),
+                            ("GRID", (0, 0), (-1, -1), 0.15, colors.grey),
+                        ]
+                    )
+                )
+                story.append(t_ec)
+                story.append(Spacer(1, 6))
             rubs = block.get("rubros") or []
             if rubs:
-                story.append(Paragraph("<b>Egresos por rubro</b>", styles["Heading2"]))
+                story.append(Paragraph("<b>Egresos por rubro (solo rubro)</b>", styles["Heading2"]))
                 rr = [["Rubro", "Total", "% del total egresos"]]
                 for r in rubs[:50]:
                     rr.append(
@@ -693,7 +807,9 @@ def _build_pdf_bytes(
                 story.append(Spacer(1, 6))
             negs = block.get("negocios") or []
             if negs:
-                story.append(Paragraph("<b>Ingresos por negocio / fuente</b>", styles["Heading2"]))
+                story.append(
+                    Paragraph("<b>Ingresos por negocio / fuente (solo negocio)</b>", styles["Heading2"])
+                )
                 nr = [["Negocio / fuente", "Total", "% del total ingresos"]]
                 for r in negs[:50]:
                     nr.append(
@@ -899,12 +1015,14 @@ def render_reports_page(
             **1 — Flujo real** es lo que la app considera *dinero que entra o sale de verdad* (ventas, gastos, fees).
             Los **traspasos** (de una cuenta tuya a otra) **no** son ganancia ni gasto: solo cambiás de “caja”.
 
+            **1.1** coincide con el **Panorama global** del Dashboard: **negocio → cuenta donde entra** y **cuenta → rubro**.
+
             **2 — Traspasos resumidos** (origen → destino) y **2b** el **listado de todas las piernas** (cada egreso/ingreso).
 
             **3 — Todo registrado por moneda** (solo si hay traspasos y tenés excluidos del flujo) suma **cada pierna**
             del movimiento: por eso ingresos y egresos se inflan respecto al flujo real; sirve para cruzar con extractos.
 
-            **1.5** solo **egresos por rubro**; **1.6** solo **ingresos por negocio** (más claros por separado).
+            **1.5 / 1.6** agrupan **solo** por rubro o **solo** por negocio (como los gráficos de torta), sin cruzar con cuenta.
 
             **Calidad** = % de gastos sin rubro e ingresos sin negocio (para ver si falta clasificar). **Comparación** =
             mismo número de días **antes** de tu rango. **Gráficos** repiten rubros/negocios en forma visual; **tendencia**
@@ -968,7 +1086,8 @@ def render_reports_page(
         "PDF en tamaño carta US (Letter) apaisado, márgenes 1/2 pulgada; tablas con anchos proporcionales al ancho útil para evitar cortes.",
         "Flujo real = ingresos y egresos sin contar traspasos entre cuentas propias (si la casilla está activa en la app).",
         "Traspaso = egreso en un origen e ingreso en un destino; el patrimonio total no cambia, solo la cuenta donde está el dinero.",
-        "Incluye calidad de datos, comparación con período anterior, resumen por rubro, por negocio, traspasos y piernas.",
+        "Tras los totales por moneda: tablas negocio→cuenta y cuenta→rubro (como el Panorama global), luego rubro solo y negocio solo.",
+        "Incluye calidad de datos, comparación con período anterior, traspasos y piernas.",
     ]
 
     st.markdown(
@@ -1018,6 +1137,57 @@ def render_reports_page(
         use_container_width=True,
         hide_index=True,
     )
+
+    st.markdown(
+        '<p class="lk-section">📍 1.1 Flujo narrativo (como el Panorama global)</p>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "**Entradas:** de qué **negocio / fuente** y en **qué cuenta** quedó el dinero. "
+        "**Salidas:** de **qué cuenta** salió y en **qué rubro** registraste el gasto. "
+        "Respeta la misma opción de **excluir traspasos** que arriba."
+    )
+    if not analysis:
+        st.caption("Sin movimientos de flujo en el período: no hay tablas 1.1.")
+    else:
+        for blk in analysis:
+            cur = blk["currency"]
+            st.markdown(f"**Moneda {cur}**")
+            inc_rows = blk.get("ingreso_negocio_cuenta") or []
+            if inc_rows:
+                st.markdown("*Ingresos — negocio → cuenta donde entra*")
+                st.dataframe(
+                    pd.DataFrame(inc_rows).rename(
+                        columns={
+                            "negocio": "Negocio / fuente",
+                            "cuenta": "Cuenta donde entra",
+                            "total": f"Total ({cur})",
+                            "pct": "% del total ingresos",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.caption("Sin ingresos en esta moneda en el período.")
+            egr_rows = blk.get("egreso_cuenta_rubro") or []
+            if egr_rows:
+                st.markdown("*Egresos — cuenta de la que sale → rubro*")
+                st.dataframe(
+                    pd.DataFrame(egr_rows).rename(
+                        columns={
+                            "cuenta": "Cuenta de la que sale",
+                            "rubro": "Rubro / gasto",
+                            "total": f"Total ({cur})",
+                            "pct": "% del total egresos",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.caption("Sin egresos en esta moneda en el período.")
+            st.divider()
 
     acc_rows = _flow_by_account(txs_use, amap)
     st.markdown(
@@ -1143,12 +1313,12 @@ def render_reports_page(
             st.plotly_chart(fig_t, use_container_width=True)
 
     st.markdown(
-        '<p class="lk-section">🔻 1.5 Egresos por rubro (por moneda)</p>',
+        '<p class="lk-section">🔻 1.5 Egresos por rubro solo (por moneda)</p>',
         unsafe_allow_html=True,
     )
     st.caption(
-        "Solo gastos clasificados por **rubro**. **% del total egresos** = peso de cada rubro dentro de todo lo gastado "
-        "en esa moneda en el período."
+        "Agrupa **solo por rubro** (sin mostrar la cuenta de salida); útil para comparar con la **torta** de egresos. "
+        "Para **cuenta + rubro** usá la **1.1**."
     )
     if not analysis:
         st.caption("Sin movimientos de flujo en el período para analizar.")
@@ -1170,12 +1340,12 @@ def render_reports_page(
                 st.caption("Sin egresos con rubro en esta moneda.")
 
     st.markdown(
-        '<p class="lk-section">🔺 1.6 Ingresos por negocio (por moneda)</p>',
+        '<p class="lk-section">🔺 1.6 Ingresos por negocio solo (por moneda)</p>',
         unsafe_allow_html=True,
     )
     st.caption(
-        "Solo entradas clasificadas por **negocio o fuente**. **% del total ingresos** = participación de cada una "
-        "dentro de todo lo ingresado en esa moneda."
+        "Agrupa **solo por negocio** (sin cuenta destino); útil para la **torta** de ingresos. "
+        "Para **negocio + cuenta** usá la **1.1**."
     )
     if analysis:
         for blk in analysis:

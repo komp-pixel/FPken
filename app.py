@@ -2037,11 +2037,62 @@ Así el **panorama** te muestra **de qué negocio entra** el dinero y **dónde l
         else:
             c4.metric("Saldo ≈ VES", "—", help="Elegí una tasa válida en la barra lateral.")
 
+        st.markdown("##### 🧭 Dónde quedaste · conciliar con el banco")
+        st.caption(
+            "**Cuenta del lateral:** la que estás mirando ahora. "
+            "El recuadro **verde** de abajo depende del **periodo** que elijas; el **último registro en la app** "
+            "(sin mirar fechas) es siempre este:"
+        )
+        if txs:
+            _g0 = txs[0]
+            try:
+                _gamt = float(_g0.get("amount") or 0)
+            except (TypeError, ValueError):
+                _gamt = 0.0
+            _gs = f"{_gamt:,.2f}"
+            st.info(
+                f"**Último movimiento registrado en «{acc.get('label', '—')}»** (orden cronológico en la app):  \n"
+                f"**{_g0.get('tx_date', '—')}** · {_tx_naturaleza_row(_g0)} · "
+                f"{_gs} {acc.get('currency', 'USD')} · "
+                f"{str(_g0.get('description') or '')[:120]}"
+            )
+        else:
+            st.info(
+                f"En **{acc.get('label', '—')}** todavía no hay movimientos cargados. "
+                "Registrá o importá para poder conciliar con el extracto."
+            )
+        st.caption(
+            "**Mapa rápido:** esta pestaña = movimientos de **una** cuenta (lateral). "
+            "Más abajo, expander **Traspasos entre cuentas** = solo cruces entre cuentas (ej. a bolívares). "
+            "**Dashboard → Panorama global** = todas las cuentas juntas (otro análisis)."
+        )
+
         st.subheader("📌 Movimientos del periodo · cuenta del lateral")
         st.caption(
-            "Al tocar **Ingreso**, **Egreso** o **Traspaso** la página se recarga y **se vuelve a mostrar** este listado. "
-            "Así ves el **último movimiento** y podés cruzarlo con el banco."
+            "La tabla respeta **desde / hasta**. Atajos de fechas para alinear con el extracto. "
+            "Al cambiar **Ingreso / Egreso / Traspaso** la página se recarga y volvés a ver la tabla."
         )
+        _preset = st.columns([1, 1, 1, 1, 2])
+        with _preset[0]:
+            if st.button("7 días", key="kf_mov_pres_7d", help="Periodo: hoy menos 6 hasta hoy"):
+                st.session_state["kf_mov_period_from"] = date.today() - timedelta(days=6)
+                st.session_state["kf_mov_period_to"] = date.today()
+                st.rerun()
+        with _preset[1]:
+            if st.button("30 días", key="kf_mov_pres_30d"):
+                st.session_state["kf_mov_period_from"] = date.today() - timedelta(days=29)
+                st.session_state["kf_mov_period_to"] = date.today()
+                st.rerun()
+        with _preset[2]:
+            if st.button("Este mes", key="kf_mov_pres_mes"):
+                st.session_state["kf_mov_period_from"] = date.today().replace(day=1)
+                st.session_state["kf_mov_period_to"] = date.today()
+                st.rerun()
+        with _preset[3]:
+            if st.button("Todo (cargado)", key="kf_mov_pres_all", help="Desde 2000 hasta hoy · solo lo que ya trajo la app"):
+                st.session_state["kf_mov_period_from"] = date(2000, 1, 1)
+                st.session_state["kf_mov_period_to"] = date.today()
+                st.rerun()
         _mp_a, _mp_b = st.columns(2)
         with _mp_a:
             _mov_period_from = st.date_input(
