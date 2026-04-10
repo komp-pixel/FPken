@@ -2555,9 +2555,15 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                 )
 
         with st.expander("🔀 Traspasos entre cuentas · resumen y cadena", expanded=True):
-            st.caption(
-                "Solo **traspasos** (grupo origen + destino), **todas** las cuentas. "
-                "Para duplicados o errores; podés borrar por grupo más abajo."
+            st.markdown(
+                """
+**¿Para qué sirve?** Ver en un solo lugar los movimientos que son **un mismo traspaso**
+(egreso en una cuenta + ingreso en la otra). Sirve para **cruzar con el banco**, ver si quedó **duplicado**
+o con **diferencia** entre lo que salió y lo que entró, y para **borrar las dos piernas juntas** (abajo en *Editar o borrar*).
+
+**¿Qué es el “ID enlace”?** Es un código interno que **une** el egreso y el ingreso. **No viene del banco**:
+lo usa la app para saber que dos filas son el mismo traspaso. Si no lo necesitás, ignorá esa columna.
+                """
             )
             _all_ids = list(opts.keys())
             _all_txs = load_transactions_for_accounts(sb, _all_ids, limit=16000)
@@ -2575,18 +2581,28 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
             ]
             if _group_rows:
                 _df_tr = pd.DataFrame(_group_rows).sort_values("fecha", ascending=False)
-                with st.expander("🔗 Vista en cadena (una línea por traspaso)", expanded=True):
+                with st.expander("🔗 Vista compacta (lista legible)", expanded=False):
                     st.caption(
-                        "Formato **origen (moneda) → destino (moneda)**; misma info que la tabla."
+                        "Misma información que la **tabla de abajo**, en formato texto. "
+                        "El **ID enlace** completo está solo en la tabla y en *Eliminar traspaso*."
                     )
-                    for gr in sorted(_group_rows, key=lambda x: str(x.get("fecha") or ""), reverse=True):
+                    _sorted_gr = sorted(
+                        _group_rows, key=lambda x: str(x.get("fecha") or ""), reverse=True
+                    )
+                    for i, gr in enumerate(_sorted_gr):
+                        _dsc = str(gr.get("descripcion") or "").strip() or "(sin descripción)"
+                        _cad = html.escape(str(gr.get("cadena_legible") or "—"))
                         st.markdown(
-                            f"- **{gr.get('fecha', '—')}** · `{gr.get('cadena_legible', '—')}` · "
-                            f"_{str(gr.get('descripcion') or '')[:72]}_ · grupo `{gr.get('grupo', '')}`"
+                            f"**{gr.get('fecha', '—')}** · {html.escape(_dsc[:100])}{'…' if len(_dsc) > 100 else ''}  \n"
+                            f"<span style='opacity:0.85;font-size:0.92em'>{_cad}</span>",
+                            unsafe_allow_html=True,
                         )
+                        if i < len(_sorted_gr) - 1:
+                            st.divider()
                 _df_show = _df_tr[
                     [
                         "fecha",
+                        "descripcion",
                         "origen",
                         "moneda_origen",
                         "egreso",
@@ -2594,7 +2610,6 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                         "moneda_destino",
                         "ingreso",
                         "diferencia",
-                        "descripcion",
                         "grupo",
                     ]
                 ].copy()
@@ -2610,6 +2625,7 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                 _df_show = _df_show.rename(
                     columns={
                         "fecha": "Fecha",
+                        "descripcion": "Descripción",
                         "origen": "Origen",
                         "moneda_origen": "Mon. origen",
                         "egreso": "Egresa",
@@ -2617,11 +2633,41 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                         "moneda_destino": "Mon. destino",
                         "ingreso": "Ingresa",
                         "diferencia": "Diferencia",
-                        "descripcion": "Descripción",
-                        "grupo": "Grupo",
+                        "grupo": "ID enlace",
                     }
                 )
-                st.dataframe(_df_show, use_container_width=True, hide_index=True)
+                _tr_col_cfg: dict[str, Any] = {
+                    "Fecha": st.column_config.TextColumn("Fecha", width="small"),
+                    "Descripción": st.column_config.TextColumn(
+                        "Descripción",
+                        width="large",
+                        help="Texto que cargaste al registrar (visible también en cada movimiento).",
+                    ),
+                    "Origen": st.column_config.TextColumn("Origen", width="medium"),
+                    "Mon. origen": st.column_config.TextColumn("M. origen", width="small"),
+                    "Egresa": st.column_config.TextColumn("Egresa", width="small"),
+                    "Destino": st.column_config.TextColumn("Destino", width="medium"),
+                    "Mon. destino": st.column_config.TextColumn("M. dest.", width="small"),
+                    "Ingresa": st.column_config.TextColumn("Ingresa", width="small"),
+                    "Diferencia": st.column_config.TextColumn(
+                        "Dif.",
+                        width="small",
+                        help="Egreso − ingreso (en números crudos; monedas distintas no son comparables al pie de la letra).",
+                    ),
+                    "ID enlace": st.column_config.TextColumn(
+                        "ID enlace",
+                        width="small",
+                        help="Código interno que une las dos piernas. Para borrar el par: Editar o borrar → Eliminar traspaso.",
+                    ),
+                }
+                st.markdown("##### Tabla de traspasos")
+                st.caption("Deslizá horizontalmente si no ves todas las columnas.")
+                st.dataframe(
+                    _df_show,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config=_tr_col_cfg,
+                )
             else:
                 st.info("No se encontraron traspasos enlazados con `transfer_group_id`.")
 
