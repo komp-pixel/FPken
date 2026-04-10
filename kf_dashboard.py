@@ -170,6 +170,14 @@ def render_finance_dashboard(
             unsafe_allow_html=True,
         )
 
+    if float(ing) > 0:
+        st.caption(
+            f"Relación período: los egresos representan el **{float(egr) / float(ing) * 100:.1f} %** de los ingresos "
+            f"({currency}, sin traspasos si la casilla está activa)."
+        )
+    elif float(egr) > 0:
+        st.caption("En el período hay egresos pero no ingresos registrados (en el flujo filtrado).")
+
     if exclude_transfers and len(dff_tr):
         tr_in = float(dff_tr[dff_tr["tx_type"] == "ingreso"]["amount"].sum())
         tr_out = float(dff_tr[dff_tr["tx_type"] == "egreso"]["amount"].sum())
@@ -256,8 +264,9 @@ def render_finance_dashboard(
     )
     yearly["neto"] = yearly["ingreso"] - yearly["egreso"]
 
-    tab_d, tab_m, tab_y, tab_neg, tab_cat = st.tabs(
+    tab_sum, tab_d, tab_m, tab_y, tab_neg, tab_cat = st.tabs(
         [
+            "Resumen inteligente",
             "Diario",
             "Mensual",
             "Anual",
@@ -274,6 +283,84 @@ def render_finance_dashboard(
         margin=dict(l=40, r=20, t=40, b=40),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
+
+    with tab_sum:
+        st.caption(
+            "Cuenta activa del lateral · mismos filtros de período y de traspasos que los gráficos de abajo. "
+            "Los **% de peso** son sobre el total de ingresos o de egresos del período."
+        )
+        tot_mv = float(ing) + float(egr)
+        if tot_mv <= 0:
+            st.info("No hay ingresos ni egresos de flujo en este período para resumir.")
+        else:
+            fig_mix = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=["Ingresos", "Egresos"],
+                        values=[float(ing), float(egr)],
+                        hole=0.45,
+                        marker=dict(colors=["#34d399", "#fb7185"]),
+                        textinfo="label+percent",
+                    )
+                ]
+            )
+            fig_mix.update_layout(
+                **layout,
+                title="Proporción ingresos vs egresos (volumen movido en el período)",
+                showlegend=True,
+            )
+            st.plotly_chart(fig_mix, use_container_width=True)
+        if float(ing) > 0:
+            st.metric(
+                "Egresos como porcentaje de los ingresos",
+                f"{float(egr) / float(ing) * 100:.1f} %",
+                help="Si supera 100 %, gastaste más de lo que ingresó en el período.",
+            )
+        c_s1, c_s2 = st.columns(2)
+        with c_s1:
+            st.markdown("##### Ingresos por negocio (peso %)")
+            ing_df2 = dff_flow[dff_flow["tx_type"] == "ingreso"].copy()
+            ing_df2["business"] = ing_df2["business"].fillna("(sin negocio)")
+            if ing_df2.empty:
+                st.caption("Sin ingresos en el período.")
+            else:
+                agn2 = (
+                    ing_df2.groupby("business", as_index=False)["amount"]
+                    .sum()
+                    .sort_values("amount", ascending=False)
+                )
+                t_ing = float(ing)
+                agn2["pct"] = agn2["amount"] / t_ing * 100.0 if t_ing > 0 else 0.0
+                agn2 = agn2.rename(
+                    columns={
+                        "business": "Negocio / fuente",
+                        "amount": "Total",
+                        "pct": "% del total ingresos",
+                    }
+                )
+                st.dataframe(agn2, use_container_width=True, hide_index=True)
+        with c_s2:
+            st.markdown("##### Gastos por categoría (peso %)")
+            cat_df2 = dff_flow[dff_flow["tx_type"] == "egreso"].copy()
+            cat_df2["category"] = cat_df2["category"].fillna("(sin categoría)")
+            if cat_df2.empty:
+                st.caption("Sin egresos en el período.")
+            else:
+                agg2 = (
+                    cat_df2.groupby("category", as_index=False)["amount"]
+                    .sum()
+                    .sort_values("amount", ascending=False)
+                )
+                t_eg = float(egr)
+                agg2["pct"] = agg2["amount"] / t_eg * 100.0 if t_eg > 0 else 0.0
+                agg2 = agg2.rename(
+                    columns={
+                        "category": "Categoría",
+                        "amount": "Total",
+                        "pct": "% del total egresos",
+                    }
+                )
+                st.dataframe(agg2, use_container_width=True, hide_index=True)
 
     with tab_d:
         fig_d = go.Figure()
@@ -337,6 +424,19 @@ def render_finance_dashboard(
                 .sum()
                 .sort_values("amount", ascending=False)
             )
+            tot_n = float(agn["amount"].sum()) or 1.0
+            agn["pct"] = agn["amount"] / tot_n * 100.0
+            st.dataframe(
+                agn.rename(
+                    columns={
+                        "business": "Negocio / fuente",
+                        "amount": "Total",
+                        "pct": "% del total ingresos",
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
             fig_n = go.Figure(
                 go.Bar(
                     x=agn["amount"],
@@ -361,6 +461,19 @@ def render_finance_dashboard(
         else:
             agg = cat_df.groupby("category", as_index=False)["amount"].sum().sort_values(
                 "amount", ascending=False
+            )
+            tot_c = float(agg["amount"].sum()) or 1.0
+            agg["pct"] = agg["amount"] / tot_c * 100.0
+            st.dataframe(
+                agg.rename(
+                    columns={
+                        "category": "Categoría",
+                        "amount": "Total",
+                        "pct": "% del total egresos",
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True,
             )
             fig_c = go.Figure(
                 go.Bar(

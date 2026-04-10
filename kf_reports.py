@@ -32,6 +32,20 @@ def _acc_map(accounts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(a["id"]): a for a in accounts}
 
 
+def _disp_str(v: Any) -> str:
+    if v is None:
+        return ""
+    try:
+        if pd.isna(v):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    s = str(v).strip()
+    if not s or s.lower() == "none":
+        return ""
+    return s
+
+
 def _is_transfer_like_tx(t: dict[str, Any]) -> bool:
     gid = str(t.get("transfer_group_id") or "").strip()
     if gid:
@@ -155,6 +169,62 @@ def _pdf_safe_line(line: str) -> str:
     )
 
 
+def _analyze_flow_by_currency(
+    txs: list[dict[str, Any]], amap: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Por moneda de la cuenta: totales, % gasto/ingreso, peso de rubros y de negocios."""
+    buckets: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"ing": 0.0, "egr": 0.0, "ing_items": [], "egr_items": []}
+    )
+    for t in txs:
+        aid = str(t.get("account_id", ""))
+        cur = str(amap.get(aid, {}).get("currency", "USD"))
+        amt = float(t.get("amount") or 0)
+        if str(t.get("tx_type")) == "ingreso":
+            buckets[cur]["ing"] += amt
+            buckets[cur]["ing_items"].append(t)
+        else:
+            buckets[cur]["egr"] += amt
+            buckets[cur]["egr_items"].append(t)
+
+    out: list[dict[str, Any]] = []
+    for cur in sorted(buckets.keys()):
+        b = buckets[cur]
+        ing, egr = float(b["ing"]), float(b["egr"])
+        pct_gasto = (egr / ing * 100.0) if ing > 0 else None
+
+        rub: dict[str, float] = defaultdict(float)
+        for t in b["egr_items"]:
+            k = str(t.get("category") or "").strip() or "(sin categoría)"
+            rub[k] += float(t.get("amount") or 0)
+        rub_rows = [
+            {"rubro": name, "total": val, "pct": (val / egr * 100.0) if egr > 0 else 0.0}
+            for name, val in sorted(rub.items(), key=lambda x: -x[1])
+        ]
+
+        bus: dict[str, float] = defaultdict(float)
+        for t in b["ing_items"]:
+            k = str(t.get("business") or "").strip() or "(sin negocio)"
+            bus[k] += float(t.get("amount") or 0)
+        bus_rows = [
+            {"negocio": name, "total": val, "pct": (val / ing * 100.0) if ing > 0 else 0.0}
+            for name, val in sorted(bus.items(), key=lambda x: -x[1])
+        ]
+
+        out.append(
+            {
+                "currency": cur,
+                "ing": ing,
+                "egr": egr,
+                "net": ing - egr,
+                "pct_gasto_sobre_ingreso": pct_gasto,
+                "rubros": rub_rows,
+                "negocios": bus_rows,
+            }
+        )
+    return out
+
+
 def _build_pdf_bytes(
     title: str,
     period: str,
@@ -167,9 +237,10 @@ def _build_pdf_bytes(
     transfer_head: list[str] | None = None,
     transfer_rows: list[list[str]] | None = None,
     brute_rows: list[list[str]] | None = None,
+    analysis_by_currency: list[dict[str, Any]] | None = None,
 ) -> bytes:
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import cm
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
@@ -177,11 +248,11 @@ def _build_pdf_bytes(
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
-        pagesize=A4,
-        rightMargin=1.5 * cm,
-        leftMargin=1.5 * cm,
-        topMargin=1.5 * cm,
-        bottomMargin=1.5 * cm,
+        pagesize=landscape(A4),
+        rightMargin=1.1 * cm,
+        leftMargin=1.1 * cm,
+        topMargin=1.1 * cm,
+        bottomMargin=1.1 * cm,
     )
     styles = getSampleStyleSheet()
     story: list[Any] = []
@@ -216,7 +287,98 @@ def _build_pdf_bytes(
         )
     )
     story.append(t1)
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 10))
+    if analysis_by_currency:
+        story.append(Paragraph("<b>Análisis por moneda (peso de rubros y negocios)</b>", styles["Heading2"]))
+        story.append(
+            Paragraph(
+                "<i>% gasto = egresos ÷ ingresos del período en esa moneda. Los porcentajes de rubro son sobre el total "
+                "de egresos; los de negocio sobre el total de ingresos.</i>",
+                styles["Normal"],
+            )
+        )
+        story.append(Spacer(1, 6))
+        for block in analysis_by_currency:
+            cur = str(block.get("currency", "?"))
+            ing = float(block.get("ing") or 0)
+            egr = float(block.get("egr") or 0)
+            net = float(block.get("net") or 0)
+            pg = block.get("pct_gasto_sobre_ingreso")
+            pg_s = f"{pg:.1f} %" if pg is not None else "n/d (sin ingresos)"
+            story.append(Paragraph(f"<b>Moneda {cur}</b> — Ingresos {ing:,.2f} · Egresos {egr:,.2f} · Neto {net:,.2f} · Gasto/ingreso {pg_s}", styles["Normal"]))
+            story.append(Spacer(1, 4))
+            sum_a = Table(
+                [
+                    ["Concepto", "Valor"],
+                    ["Total ingresos", f"{ing:,.2f} {cur}"],
+                    ["Total egresos", f"{egr:,.2f} {cur}"],
+                    ["Neto flujo", f"{net:,.2f} {cur}"],
+                    ["Gastos como % de ingresos", pg_s],
+                ]
+            )
+            sum_a.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f766e")),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                        ("GRID", (0, 0), (-1, -1), 0.2, colors.grey),
+                        ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ]
+                )
+            )
+            story.append(sum_a)
+            story.append(Spacer(1, 6))
+            rubs = block.get("rubros") or []
+            if rubs:
+                story.append(Paragraph("<b>Egresos por rubro</b>", styles["Heading2"]))
+                rr = [["Rubro", "Total", "% del total egresos"]]
+                for r in rubs[:18]:
+                    rr.append(
+                        [
+                            _pdf_safe_line(str(r.get("rubro", "")))[:32],
+                            f'{float(r.get("total") or 0):,.2f}',
+                            f'{float(r.get("pct") or 0):.1f} %',
+                        ]
+                    )
+                trb = Table(rr, colWidths=[200, 80, 100])
+                trb.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#7f1d1d")),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                            ("FONTSIZE", (0, 0), (-1, -1), 7),
+                            ("GRID", (0, 0), (-1, -1), 0.15, colors.grey),
+                        ]
+                    )
+                )
+                story.append(trb)
+                story.append(Spacer(1, 6))
+            negs = block.get("negocios") or []
+            if negs:
+                story.append(Paragraph("<b>Ingresos por negocio / fuente</b>", styles["Heading2"]))
+                nr = [["Negocio / fuente", "Total", "% del total ingresos"]]
+                for r in negs[:18]:
+                    nr.append(
+                        [
+                            _pdf_safe_line(str(r.get("negocio", "")))[:32],
+                            f'{float(r.get("total") or 0):,.2f}',
+                            f'{float(r.get("pct") or 0):.1f} %',
+                        ]
+                    )
+                tnb = Table(nr, colWidths=[200, 80, 100])
+                tnb.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#134e4a")),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                            ("FONTSIZE", (0, 0), (-1, -1), 7),
+                            ("GRID", (0, 0), (-1, -1), 0.15, colors.grey),
+                        ]
+                    )
+                )
+                story.append(tnb)
+                story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
     if transfer_head and transfer_rows:
         story.append(Paragraph("<b>Traspasos resumidos (origen → destino)</b>", styles["Heading2"]))
         story.append(
@@ -226,14 +388,16 @@ def _build_pdf_bytes(
             )
         )
         story.append(Spacer(1, 6))
-        t_tr = Table([transfer_head] + transfer_rows[:200], repeatRows=1)
+        tr_w = [52, 72, 58, 28, 72, 58, 28, 118]
+        t_tr = Table([transfer_head] + transfer_rows[:200], repeatRows=1, colWidths=tr_w)
         t_tr.setStyle(
             TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#14532d")),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                    ("FONTSIZE", (0, 0), (-1, -1), 7),
-                    ("GRID", (0, 0), (-1, -1), 0.15, colors.grey),
+                    ("FONTSIZE", (0, 0), (-1, -1), 6),
+                    ("GRID", (0, 0), (-1, -1), 0.12, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ]
             )
         )
@@ -262,15 +426,19 @@ def _build_pdf_bytes(
         )
         story.append(t_b)
         story.append(Spacer(1, 12))
-    story.append(Paragraph("<b>Detalle de movimientos (misma vista que en pantalla)</b>", styles["Heading2"]))
-    t2 = Table([detail_head] + detail_rows, repeatRows=1)
+    story.append(Paragraph("<b>Detalle de movimientos (horizontal, texto recortado para encajar)</b>", styles["Heading2"]))
+    detail_col_w = [48, 70, 26, 20, 54, 284, 72, 36, 44, 63]
+    t2 = Table([detail_head] + detail_rows, repeatRows=1, colWidths=detail_col_w)
     t2.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d2137")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                ("FONTSIZE", (0, 0), (-1, -1), 7),
-                ("GRID", (0, 0), (-1, -1), 0.15, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 6),
+                ("GRID", (0, 0), (-1, -1), 0.12, colors.grey),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
             ]
         )
     )
@@ -326,8 +494,10 @@ def render_reports_page(
             **3 — Todo registrado por moneda** (solo si hay traspasos y tenés excluidos del flujo) suma **cada pierna**
             del movimiento: por eso ingresos y egresos se inflan respecto al flujo real; sirve para cruzar con extractos.
 
-            El **detalle** al final es la misma grilla que respeta la casilla *Excluir traspasos*; el PDF incluye guía,
-            traspasos resumidos y (cuando aplica) la tabla bruta.
+            **1.5** resume por **moneda** el peso de cada rubro y de cada fuente de ingreso, y el **% gasto/ingreso**.
+
+            El **detalle** al final va agrupado (ingresos, luego egresos por rubro); el **PDF** es horizontal e incluye
+            guía, análisis por moneda, traspasos y (cuando aplica) la tabla bruta.
             """
         )
 
@@ -369,6 +539,7 @@ def render_reports_page(
     )
 
     guide_lines_pdf = [
+        "Este PDF está en formato horizontal (apaisado) para que el detalle de movimientos entre mejor en la hoja.",
         "Flujo real = ingresos y egresos sin contar traspasos entre cuentas propias (si la casilla está activa en la app).",
         "Traspaso = egreso en un origen e ingreso en un destino; el patrimonio total no cambia, solo la cuenta donde está el dinero.",
         "La tabla 'Todo registrado por moneda' suma cada pierna: si hubo traspasos, ingresos y egresos brutos serán mayores que el flujo real.",
@@ -400,6 +571,49 @@ def render_reports_page(
         use_container_width=True,
         hide_index=True,
     )
+
+    analysis = _analyze_flow_by_currency(txs_use, amap) if txs_use else []
+    st.markdown("### 1.5 Análisis inteligente (por moneda)")
+    st.caption(
+        "Cada moneda se analiza aparte (no se mezclan USD con VES). **% gasto/ingreso** = cuánto de lo que entró "
+        "se fue en egresos. Los **rubros** muestran el peso de cada gasto; los **negocios**, el de cada ingreso."
+    )
+    if not analysis:
+        st.caption("Sin movimientos de flujo en el período para analizar.")
+    else:
+        for blk in analysis:
+            cur = blk["currency"]
+            ing, egr, net = blk["ing"], blk["egr"], blk["net"]
+            pg = blk["pct_gasto_sobre_ingreso"]
+            pg_txt = f"{pg:.1f} %" if pg is not None else "n/d (no hubo ingresos)"
+            st.markdown(f"**{cur}** · Ingresos **{ing:,.2f}** · Egresos **{egr:,.2f}** · Neto **{net:,.2f}** · Gastos/ingresos **{pg_txt}**")
+            c_left, c_right = st.columns(2)
+            with c_left:
+                st.caption("Egresos por rubro (peso)")
+                dr = blk.get("rubros") or []
+                if dr:
+                    st.dataframe(
+                        pd.DataFrame(dr).rename(
+                            columns={"rubro": "Rubro", "total": "Total", "pct": "% del total egresos"}
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.caption("—")
+            with c_right:
+                st.caption("Ingresos por negocio / fuente (peso)")
+                dn = blk.get("negocios") or []
+                if dn:
+                    st.dataframe(
+                        pd.DataFrame(dn).rename(
+                            columns={"negocio": "Negocio / fuente", "total": "Total", "pct": "% del total ingresos"}
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.caption("—")
 
     st.markdown("### 2. Traspasos entre cuentas (origen → destino)")
     if not txs_transfer_like:
@@ -489,17 +703,41 @@ def render_reports_page(
                 "tipo": t.get("tx_type"),
                 "monto": float(t.get("amount") or 0),
                 "descripcion": (t.get("description") or "")[:80],
-                "rubro": t.get("category") or "",
-                "negocio": t.get("business") or "",
+                "rubro": _disp_str(t.get("category")),
+                "negocio": _disp_str(t.get("business")),
                 "comision": float(t["fee_amount"]) if t.get("fee_amount") else None,
-                "etiqueta": t.get("transfer_tag") or "",
+                "etiqueta": _disp_str(t.get("transfer_tag")),
                 "cuenta_relacionada": cuenta_rel,
                 "notas": (t.get("transaction_notes") or "")[:60],
             }
         )
     df = pd.DataFrame(rows)
+    if not df.empty:
+        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+        df_ing = df[df["tipo"] == "ingreso"].sort_values(
+            by=["negocio", "fecha"], ascending=[True, False], na_position="last"
+        )
+        df_eg = df[df["tipo"] == "egreso"].sort_values(
+            by=["rubro", "fecha"], ascending=[True, False], na_position="last"
+        )
+        df = pd.concat([df_ing, df_eg], ignore_index=True)
+        df["fecha"] = df["fecha"].dt.date
 
-    st.markdown("### 4. Detalle línea a línea (respeta «Excluir traspasos»)")
+    st.markdown("### 4. Detalle agrupado (ingresos arriba, egresos abajo; orden por rubro/negocio y fecha)")
+    st.caption(
+        "Tip: al **imprimir** esta pantalla con el navegador (Ctrl+P), elegí **horizontal** y márgenes normales. "
+        "El **PDF** de abajo ya va en horizontal y con columnas ajustadas."
+    )
+    st.markdown(
+        """
+        <style>
+        @media print {
+          @page { size: A4 landscape; margin: 10mm; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     if df.empty:
         st.caption("Nada que mostrar con los filtros actuales.")
     else:
@@ -516,30 +754,44 @@ def render_reports_page(
         "Etiqueta",
         "Relacionada",
     ]
-    detail_rows = []
-    for t in txs_use:
+    detail_rows_pdf: list[list[str]] = []
+    txs_ing = [t for t in txs_use if str(t.get("tx_type")) == "ingreso"]
+    txs_ing = sorted(txs_ing, key=lambda t: str(t.get("tx_date") or ""), reverse=True)
+    txs_ing = sorted(
+        txs_ing,
+        key=lambda t: (_disp_str(t.get("business")) or "zzz").lower(),
+    )
+    txs_eg = [t for t in txs_use if str(t.get("tx_type")) == "egreso"]
+    txs_eg = sorted(txs_eg, key=lambda t: str(t.get("tx_date") or ""), reverse=True)
+    txs_eg = sorted(
+        txs_eg,
+        key=lambda t: (_disp_str(t.get("category")) or "zzz").lower(),
+    )
+
+    for t in txs_ing + txs_eg:
         aid = str(t.get("account_id", ""))
         acc = amap.get(aid, {})
         cur = str(acc.get("currency", "?"))[:4]
         fee = t.get("fee_amount")
-        fee_s = f"{float(fee):,.4f}" if fee is not None else ""
+        fee_s = f"{float(fee):,.2f}" if fee is not None else ""
         _cid = str(t.get("counterpart_account_id") or "").strip()
         _rel = (
-            str(amap.get(_cid, {}).get("label", ""))[:18]
+            str(amap.get(_cid, {}).get("label", ""))[:14]
             if _cid
             else ""
         )
-        detail_rows.append(
+        rub_neg = _disp_str(t.get("category")) or _disp_str(t.get("business")) or ""
+        detail_rows_pdf.append(
             [
                 str(t.get("tx_date", ""))[:10],
-                str(acc.get("label", ""))[:22],
+                str(acc.get("label", ""))[:18],
                 cur,
                 (t.get("tx_type") or "")[:1].upper(),
-                f'{float(t.get("amount") or 0):,.4f}',
-                str(t.get("description", ""))[:35],
-                str(t.get("category") or t.get("business") or "")[:18],
+                f'{float(t.get("amount") or 0):,.2f}',
+                str(t.get("description", ""))[:44],
+                rub_neg[:22],
                 fee_s,
-                str(t.get("transfer_tag", ""))[:16],
+                _disp_str(t.get("transfer_tag"))[:12],
                 _rel,
             ]
         )
@@ -606,10 +858,11 @@ def render_reports_page(
             insight_lines,
             sum_rows,
             detail_head,
-            detail_rows[:400],
+            detail_rows_pdf[:400],
             transfer_head_pdf,
             transfer_rows_pdf,
             brute_rows_pdf,
+            analysis_by_currency=analysis if analysis else None,
         )
         st.download_button(
             "Descargar PDF (imprimir)",
