@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from io import BytesIO
 from typing import Any
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 from supabase import Client
+
+from kf_theme import is_dark_theme
 
 
 def load_tx_date_range(
@@ -254,6 +257,243 @@ def _analyze_flow_by_currency(
     return out
 
 
+def _prev_period_bounds(d0: date, d1: date) -> tuple[date, date]:
+    """Período anterior con la misma cantidad de días (inclusive)."""
+    n = max(1, (d1 - d0).days + 1)
+    p_end = d0 - timedelta(days=1)
+    p_start = p_end - timedelta(days=n - 1)
+    return p_start, p_end
+
+
+def _flow_by_account(
+    txs: list[dict[str, Any]], amap: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {}
+    for t in txs:
+        aid = str(t.get("account_id", ""))
+        if aid not in buckets:
+            acc = amap.get(aid, {})
+            buckets[aid] = {
+                "cuenta": str(acc.get("label", aid[:8])),
+                "moneda": str(acc.get("currency", "?")),
+                "ing": 0.0,
+                "egr": 0.0,
+            }
+        amt = float(t.get("amount") or 0)
+        if str(t.get("tx_type")) == "ingreso":
+            buckets[aid]["ing"] += amt
+        else:
+            buckets[aid]["egr"] += amt
+    rows: list[dict[str, Any]] = []
+    for _aid, b in sorted(
+        buckets.items(), key=lambda x: (x[1]["moneda"], x[1]["cuenta"].lower())
+    ):
+        ing, egr = float(b["ing"]), float(b["egr"])
+        rows.append(
+            {
+                "Cuenta": b["cuenta"],
+                "Moneda": b["moneda"],
+                "Ingresos": ing,
+                "Egresos": egr,
+                "Neto": ing - egr,
+            }
+        )
+    return rows
+
+
+def _data_health_rows(
+    txs: list[dict[str, Any]], amap: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Por moneda: % egresos sin rubro, % ingresos sin negocio, comisiones."""
+    by: dict[str, dict[str, float]] = defaultdict(
+        lambda: {
+            "egr_tot": 0.0,
+            "egr_sin_rub": 0.0,
+            "ing_tot": 0.0,
+            "ing_sin_neg": 0.0,
+            "fees": 0.0,
+        }
+    )
+    for t in txs:
+        aid = str(t.get("account_id", ""))
+        cur = str(amap.get(aid, {}).get("currency", "USD"))
+        amt = float(t.get("amount") or 0)
+        fee = t.get("fee_amount")
+        try:
+            fv = float(fee) if fee is not None and str(fee).strip() != "" else 0.0
+        except (TypeError, ValueError):
+            fv = 0.0
+        if fv > 0:
+            by[cur]["fees"] += fv
+        typ = str(t.get("tx_type"))
+        if typ == "egreso":
+            by[cur]["egr_tot"] += amt
+            cat = _disp_str(t.get("category"))
+            if not cat:
+                by[cur]["egr_sin_rub"] += amt
+        elif typ == "ingreso":
+            by[cur]["ing_tot"] += amt
+            bus = _disp_str(t.get("business"))
+            if not bus:
+                by[cur]["ing_sin_neg"] += amt
+
+    out: list[dict[str, Any]] = []
+    for cur in sorted(by.keys()):
+        b = by[cur]
+        et, it = b["egr_tot"], b["ing_tot"]
+        pct_r = (b["egr_sin_rub"] / et * 100.0) if et > 0 else 0.0
+        pct_n = (b["ing_sin_neg"] / it * 100.0) if it > 0 else 0.0
+        out.append(
+            {
+                "Moneda": cur,
+                "% egresos sin rubro": round(pct_r, 1),
+                "% ingresos sin negocio": round(pct_n, 1),
+                "Comisiones (suma)": round(b["fees"], 2),
+            }
+        )
+    return out
+
+
+def _comparison_table_rows(
+    by_cur: dict[str, dict[str, float]], by_prev: dict[str, dict[str, float]]
+) -> list[dict[str, Any]]:
+    currencies = sorted(set(by_cur.keys()) | set(by_prev.keys()))
+    rows: list[dict[str, Any]] = []
+    for cur in currencies:
+        c = by_cur.get(cur, {"ing": 0.0, "egr": 0.0})
+        p = by_prev.get(cur, {"ing": 0.0, "egr": 0.0})
+        net_c = float(c.get("ing", 0)) - float(c.get("egr", 0))
+        net_p = float(p.get("ing", 0)) - float(p.get("egr", 0))
+        var_pct: float | None = None
+        if net_p != 0:
+            var_pct = (net_c - net_p) / abs(net_p) * 100.0
+        rows.append(
+            {
+                "Moneda": cur,
+                "Neto este período": round(net_c, 2),
+                "Neto período anterior": round(net_p, 2),
+                "Var. % neto": round(var_pct, 1) if var_pct is not None else None,
+            }
+        )
+    return rows
+
+
+def _comparison_insight_append(
+    by_cur: dict[str, dict[str, float]],
+    by_prev: dict[str, dict[str, float]],
+    p0: date,
+    p1: date,
+) -> list[str]:
+    lines: list[str] = []
+    for cur in sorted(set(by_cur.keys()) | set(by_prev.keys())):
+        c = by_cur.get(cur, {"ing": 0.0, "egr": 0.0})
+        p = by_prev.get(cur, {"ing": 0.0, "egr": 0.0})
+        net_c = float(c.get("ing", 0)) - float(c.get("egr", 0))
+        net_p = float(p.get("ing", 0)) - float(p.get("egr", 0))
+        if net_p == 0 and net_c == 0:
+            continue
+        if net_p == 0:
+            lines.append(
+                f"**{cur}:** neto actual **{net_c:,.2f}** (sin neto comparable en {p0}–{p1})."
+            )
+        else:
+            v = (net_c - net_p) / abs(net_p) * 100.0
+            lines.append(
+                f"**{cur}:** neto **{net_c:,.2f}** vs **{net_p:,.2f}** en {p0}–{p1} "
+                f"({v:+.1f} % vs período anterior)."
+            )
+    if not lines:
+        lines.append(
+            f"Período anterior **{p0}** a **{p1}:** sin datos comparables en las cuentas elegidas."
+        )
+    return lines
+
+
+def _reports_plotly_layout() -> tuple[dict[str, Any], dict[str, Any]]:
+    if is_dark_theme():
+        layout = dict(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#1e293b",
+            font=dict(
+                color="#e2e8f0",
+                family="system-ui, -apple-system, sans-serif",
+                size=12,
+            ),
+            margin=dict(l=44, r=24, t=48, b=40),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            showlegend=True,
+        )
+        axis_style = dict(gridcolor="#334155", linecolor="#475569", showgrid=True)
+    else:
+        layout = dict(
+            template="plotly_white",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#f8fafc",
+            font=dict(
+                color="#334155",
+                family="system-ui, -apple-system, sans-serif",
+                size=12,
+            ),
+            margin=dict(l=44, r=24, t=48, b=40),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            showlegend=True,
+        )
+        axis_style = dict(gridcolor="#e2e8f0", linecolor="#cbd5e1", showgrid=True)
+    return layout, axis_style
+
+
+def _pie_top_n(labels_values: list[tuple[str, float]], top_n: int = 8) -> tuple[list[str], list[float]]:
+    items = [(str(l), float(v)) for l, v in labels_values if float(v) > 0]
+    items.sort(key=lambda x: -x[1])
+    if not items:
+        return [], []
+    top = items[:top_n]
+    rest = items[top_n:]
+    if rest:
+        top = top + [("Otros", sum(v for _, v in rest))]
+    return [x[0] for x in top], [x[1] for x in top]
+
+
+def _txs_to_timeseries_df(
+    txs: list[dict[str, Any]], amap: dict[str, dict[str, Any]]
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for t in txs:
+        aid = str(t.get("account_id", ""))
+        cur = str(amap.get(aid, {}).get("currency", "USD"))
+        td = t.get("tx_date")
+        if not td:
+            continue
+        typ = str(t.get("tx_type"))
+        amt = float(t.get("amount") or 0)
+        rows.append(
+            {
+                "dt": pd.to_datetime(td),
+                "currency": cur,
+                "ingreso": amt if typ == "ingreso" else 0.0,
+                "egreso": amt if typ == "egreso" else 0.0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _pick_ts_freq(d0: date, d1: date) -> tuple[str, str]:
+    span = (d1 - d0).days + 1
+    if span <= 35:
+        return "D", "día"
+    if span <= 120:
+        return "W-MON", "semana (lunes)"
+    return "MS", "mes"
+
+
+def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    buf = BytesIO()
+    out = df if not df.empty else pd.DataFrame({"mensaje": ["sin filas para este export"]})
+    out.to_csv(buf, index=False, encoding="utf-8-sig")
+    return buf.getvalue()
+
+
 def _build_pdf_bytes(
     title: str,
     period: str,
@@ -269,6 +509,8 @@ def _build_pdf_bytes(
     analysis_by_currency: list[dict[str, Any]] | None = None,
     transfer_legs_head: list[str] | None = None,
     transfer_legs_rows: list[list[str]] | None = None,
+    comparison_rows: list[list[str]] | None = None,
+    health_rows: list[list[str]] | None = None,
 ) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import landscape, letter
@@ -323,6 +565,50 @@ def _build_pdf_bytes(
     )
     story.append(t1)
     story.append(Spacer(1, 10))
+    if health_rows:
+        story.append(Paragraph("<b>Calidad de datos (resumen)</b>", styles["Heading2"]))
+        story.append(
+            Paragraph(
+                "<i>Por moneda: % de egresos sin rubro y de ingresos sin negocio; comisiones sumadas.</i>",
+                styles["Normal"],
+            )
+        )
+        story.append(Spacer(1, 6))
+        t_h = Table(health_rows)
+        t_h.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f766e")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("GRID", (0, 0), (-1, -1), 0.2, colors.grey),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        story.append(t_h)
+        story.append(Spacer(1, 10))
+    if comparison_rows:
+        story.append(Paragraph("<b>Comparación con período anterior</b>", styles["Heading2"]))
+        story.append(
+            Paragraph(
+                "<i>Misma cantidad de días que el período elegido; flujo sin traspasos si la casilla estaba activa.</i>",
+                styles["Normal"],
+            )
+        )
+        story.append(Spacer(1, 6))
+        t_cmp = Table(comparison_rows)
+        t_cmp.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4338ca")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("GRID", (0, 0), (-1, -1), 0.2, colors.grey),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        story.append(t_cmp)
+        story.append(Spacer(1, 10))
     if analysis_by_currency:
         story.append(Paragraph("<b>Análisis por moneda (peso de rubros y negocios)</b>", styles["Heading2"]))
         story.append(
@@ -559,8 +845,8 @@ def render_reports_page(
         unsafe_allow_html=True,
     )
     st.caption(
-        "Resumen por rango y cuentas. El PDF se genera en **carta US apaisada (Letter landscape)** con tablas "
-        "ajustadas al ancho útil para imprimir sin cortes."
+        "Resumen por rango y cuentas: calidad de datos, comparación con el período previo, gráficos, tendencia y CSV. "
+        "El PDF es **carta US apaisada (Letter landscape)** con tablas al ancho útil."
     )
 
     if not accounts:
@@ -603,6 +889,10 @@ def render_reports_page(
 
             **1.5** solo **egresos por rubro**; **1.6** solo **ingresos por negocio** (más claros por separado).
 
+            **Calidad** = % de gastos sin rubro e ingresos sin negocio (para ver si falta clasificar). **Comparación** =
+            mismo número de días **antes** de tu rango. **Gráficos** repiten rubros/negocios en forma visual; **tendencia**
+            agrupa por día, semana o mes según el rango.
+
             El **detalle** al final va agrupado (ingresos, luego egresos por rubro). El **PDF** es **carta US apaisada**,
             columnas calculadas al ancho útil para que no se corten al imprimir en Letter.
             """
@@ -622,6 +912,16 @@ def render_reports_page(
 
     by_cur = _by_cur_from_txs(txs_use, amap)
     by_cur_all = _by_cur_from_txs(txs, amap)
+    analysis = _analyze_flow_by_currency(txs_use, amap) if txs_use else []
+
+    p0, p1 = _prev_period_bounds(d0, d1)
+    prev_txs = load_tx_date_range(sb, sel, p0, p1)
+    prev_use = (
+        [t for t in prev_txs if not _is_transfer_like_tx(t)]
+        if exclude_transfers
+        else prev_txs
+    )
+    by_cur_prev = _by_cur_from_txs(prev_use, amap)
 
     def _insight_df(tlist: list[dict[str, Any]]) -> pd.DataFrame:
         return pd.DataFrame(
@@ -637,7 +937,9 @@ def render_reports_page(
             ]
         )
 
-    insight_lines = _insights(_insight_df(txs_use), dict(by_cur))
+    insight_lines = _insights(_insight_df(txs_use), dict(by_cur)) + _comparison_insight_append(
+        dict(by_cur), dict(by_cur_prev), p0, p1
+    )
 
     flow_caption = (
         "Solo ingresos y egresos que no son traspasos entre tus cuentas (recomendado para ver negocio)."
@@ -649,8 +951,26 @@ def render_reports_page(
         "PDF en tamaño carta US (Letter) apaisado, márgenes 1/2 pulgada; tablas con anchos proporcionales al ancho útil para evitar cortes.",
         "Flujo real = ingresos y egresos sin contar traspasos entre cuentas propias (si la casilla está activa en la app).",
         "Traspaso = egreso en un origen e ingreso en un destino; el patrimonio total no cambia, solo la cuenta donde está el dinero.",
-        "Incluye resumen por rubro, por negocio, traspasos resumidos y listado completo de piernas de traspaso.",
+        "Incluye calidad de datos, comparación con período anterior, resumen por rubro, por negocio, traspasos y piernas.",
     ]
+
+    st.markdown(
+        '<p class="lk-section" style="margin-top:0;">Calidad de datos y comparación</p>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        f"Período anterior para la comparación: **{p0}** a **{p1}** (misma duración en días que tu rango)."
+    )
+    dh = _data_health_rows(txs_use, amap)
+    if dh:
+        st.markdown("**Clasificación y comisiones** (solo flujo del período, según traspasos arriba).")
+        st.dataframe(pd.DataFrame(dh), use_container_width=True, hide_index=True)
+    else:
+        st.caption("Sin movimientos de flujo: no hay métricas de calidad.")
+    cmp_df = pd.DataFrame(_comparison_table_rows(dict(by_cur), dict(by_cur_prev)))
+    if not cmp_df.empty:
+        st.markdown("**Neto por moneda vs período anterior** (ingresos − egresos, sin traspasos si aplica).")
+        st.dataframe(cmp_df, use_container_width=True, hide_index=True)
 
     st.markdown("---")
     st.markdown(
@@ -682,7 +1002,137 @@ def render_reports_page(
         hide_index=True,
     )
 
-    analysis = _analyze_flow_by_currency(txs_use, amap) if txs_use else []
+    acc_rows = _flow_by_account(txs_use, amap)
+    st.markdown(
+        '<p class="lk-section">1.2 Flujo por cuenta (de qué caja sale y entra)</p>',
+        unsafe_allow_html=True,
+    )
+    st.caption("Totales de **ingresos** y **egresos** por cuenta en el período (misma regla de traspasos que arriba).")
+    if acc_rows:
+        st.dataframe(pd.DataFrame(acc_rows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("Sin movimientos de flujo en el período.")
+
+    layout_p, axis_p = _reports_plotly_layout()
+    st.markdown(
+        '<p class="lk-section">1.3 Gráficos por moneda (rubros y negocios)</p>',
+        unsafe_allow_html=True,
+    )
+    st.caption("Mismos datos que las tablas 1.5 y 1.6; máximo 8 ítems y el resto en **Otros**.")
+    if analysis:
+        pie_colors = (
+            ["#f97316", "#ea580c", "#c2410c", "#9a3412", "#7c2d12", "#fb923c", "#fdba74", "#fed7aa", "#94a3b8"]
+            if not is_dark_theme()
+            else ["#fb923c", "#f97316", "#ea580c", "#fdba74", "#22c55e", "#4ade80", "#86efac", "#38bdf8", "#94a3b8"]
+        )
+
+        def _cycle_colors(n: int) -> list[str]:
+            if n <= 0:
+                return []
+            base = pie_colors
+            return [base[i % len(base)] for i in range(n)]
+
+        for blk in analysis:
+            cur = blk["currency"]
+            dr = blk.get("rubros") or []
+            dn = blk.get("negocios") or []
+            st.markdown(f"**{cur}**")
+            c1, c2 = st.columns(2)
+            with c1:
+                labels_e, vals_e = _pie_top_n([(r["rubro"], r["total"]) for r in dr])
+                if labels_e:
+                    fig_e = go.Figure(
+                        data=[
+                            go.Pie(
+                                labels=labels_e,
+                                values=vals_e,
+                                hole=0.45,
+                                textinfo="percent+label",
+                                textposition="auto",
+                                marker=dict(colors=_cycle_colors(len(labels_e))),
+                            )
+                        ]
+                    )
+                    fig_e.update_layout(
+                        **layout_p,
+                        title=f"Egresos por rubro · {cur}",
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig_e, use_container_width=True)
+                else:
+                    st.caption("Sin egresos con rubro.")
+            with c2:
+                labels_i, vals_i = _pie_top_n([(r["negocio"], r["total"]) for r in dn])
+                if labels_i:
+                    fig_i = go.Figure(
+                        data=[
+                            go.Pie(
+                                labels=labels_i,
+                                values=vals_i,
+                                hole=0.45,
+                                textinfo="percent+label",
+                                textposition="auto",
+                                marker=dict(colors=_cycle_colors(len(labels_i))),
+                            )
+                        ]
+                    )
+                    fig_i.update_layout(
+                        **layout_p,
+                        title=f"Ingresos por negocio · {cur}",
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig_i, use_container_width=True)
+                else:
+                    st.caption("Sin ingresos con negocio.")
+    else:
+        st.caption("Sin datos para gráficos.")
+
+    st.markdown(
+        '<p class="lk-section">1.4 Tendencia en el tiempo (flujo agregado)</p>',
+        unsafe_allow_html=True,
+    )
+    ts_df = _txs_to_timeseries_df(txs_use, amap)
+    freq, freq_label = _pick_ts_freq(d0, d1)
+    if ts_df.empty:
+        st.caption("Sin movimientos para tendencia.")
+    else:
+        st.caption(f"Agrupación por **{freq_label}** según la duración del rango elegido.")
+        for cur in sorted(ts_df["currency"].unique()):
+            sub = ts_df[ts_df["currency"] == cur].copy()
+            g = (
+                sub.groupby(pd.Grouper(key="dt", freq=freq), as_index=False)
+                .agg(ingreso=("ingreso", "sum"), egreso=("egreso", "sum"))
+            )
+            g = g.dropna(subset=["dt"])
+            if g.empty:
+                continue
+            g["periodo"] = g["dt"].dt.strftime("%Y-%m-%d")
+            fig_t = go.Figure()
+            fig_t.add_trace(
+                go.Bar(
+                    x=g["periodo"],
+                    y=g["ingreso"],
+                    name="Ingresos",
+                    marker_color="#22c55e",
+                )
+            )
+            fig_t.add_trace(
+                go.Bar(
+                    x=g["periodo"],
+                    y=g["egreso"],
+                    name="Egresos",
+                    marker_color="#f97316",
+                )
+            )
+            fig_t.update_layout(
+                **layout_p,
+                title=f"Ingresos y egresos · {cur}",
+                barmode="group",
+                xaxis=dict(title=freq_label.capitalize(), **axis_p),
+                yaxis=dict(title=cur, **axis_p),
+            )
+            st.plotly_chart(fig_t, use_container_width=True)
+
     st.markdown(
         '<p class="lk-section">1.5 Resumen de EGRESOS por rubro (por moneda)</p>',
         unsafe_allow_html=True,
@@ -1027,6 +1477,81 @@ def render_reports_page(
                 ]
             )
 
+    health_rows_pdf: list[list[str]] | None = None
+    if dh:
+        health_rows_pdf = [
+            ["Moneda", "% egresos sin rubro", "% ingresos sin negocio", "Comisiones"],
+        ]
+        for r in dh:
+            health_rows_pdf.append(
+                [
+                    str(r["Moneda"]),
+                    f"{float(r['% egresos sin rubro']):.1f}",
+                    f"{float(r['% ingresos sin negocio']):.1f}",
+                    f"{float(r['Comisiones (suma)']):,.2f}",
+                ]
+            )
+
+    comparison_rows_pdf: list[list[str]] | None = None
+    if not cmp_df.empty:
+        comparison_rows_pdf = [
+            ["Moneda", "Neto período", "Neto período anterior", "Var % neto"],
+        ]
+        for _, row in cmp_df.iterrows():
+            v = row["Var. % neto"]
+            v_s = f"{float(v):.1f}" if pd.notna(v) and v is not None else "—"
+            comparison_rows_pdf.append(
+                [
+                    str(row["Moneda"]),
+                    f'{float(row["Neto este período"]):,.2f}',
+                    f'{float(row["Neto período anterior"]):,.2f}',
+                    v_s,
+                ]
+            )
+
+    st.markdown(
+        '<p class="lk-section">Descargas (CSV y PDF)</p>',
+        unsafe_allow_html=True,
+    )
+    st.caption("CSV en **UTF-8 con BOM** para Excel. Misma ventana de fechas y cuentas que arriba.")
+    df_csv_mon = pd.DataFrame(
+        sum_rows, columns=["Moneda", "Ingresos", "Egresos", "Neto período"]
+    )
+    df_csv_acc = pd.DataFrame(acc_rows) if acc_rows else pd.DataFrame()
+    dc1, dc2, dc3, dc4 = st.columns(4)
+    with dc1:
+        st.download_button(
+            "CSV · monedas",
+            data=_df_to_csv_bytes(df_csv_mon),
+            file_name=f"kf_reporte_monedas_{d0}_{d1}.csv",
+            mime="text/csv",
+            key="rep_csv_mon",
+        )
+    with dc2:
+        st.download_button(
+            "CSV · por cuenta",
+            data=_df_to_csv_bytes(df_csv_acc),
+            file_name=f"kf_reporte_cuentas_{d0}_{d1}.csv",
+            mime="text/csv",
+            key="rep_csv_acc",
+        )
+    with dc3:
+        st.download_button(
+            "CSV · comparación",
+            data=_df_to_csv_bytes(cmp_df),
+            file_name=f"kf_reporte_comparacion_{d0}_{d1}.csv",
+            mime="text/csv",
+            key="rep_csv_cmp",
+        )
+    with dc4:
+        st.download_button(
+            "CSV · detalle",
+            data=_df_to_csv_bytes(df),
+            file_name=f"kf_reporte_detalle_{d0}_{d1}.csv",
+            mime="text/csv",
+            key="rep_csv_det",
+        )
+
     try:
         pdf = _build_pdf_bytes(
             "Kenny Finanzas — Resumen gerencial",
@@ -1043,13 +1568,16 @@ def render_reports_page(
             analysis_by_currency=analysis if analysis else None,
             transfer_legs_head=transfer_legs_head_pdf,
             transfer_legs_rows=transfer_legs_rows_pdf,
+            comparison_rows=comparison_rows_pdf,
+            health_rows=health_rows_pdf,
         )
         st.download_button(
-            "Descargar PDF (carta apaisada)",
+            "PDF (carta apaisada)",
             data=pdf,
             file_name=f"kenny_finanzas_{d0}_{d1}.pdf",
             mime="application/pdf",
             type="primary",
+            key="rep_pdf_dl",
         )
         st.caption("En el visor de PDF / impresora, elegí **Letter** u **carta** y **horizontal** si hace falta.")
     except Exception as e:
