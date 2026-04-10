@@ -1,0 +1,3 @@
+# Evita que Git marque archivos como modificados solo por CRLF vs LF en Windows.
+* text=auto
+*.py text eol=lf
