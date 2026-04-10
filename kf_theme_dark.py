@@ -147,6 +147,18 @@ section[data-testid="stMain"] [data-testid="stCaption"] {
     background: linear-gradient(180deg, #0f172a 0%, #020617 100%) !important;
     border-right: 1px solid #334155 !important;
     color: #e2e8f0 !important;
+    width: 17rem !important;
+    min-width: 15rem !important;
+}
+[data-testid="stSidebar"] .block-container {
+    padding-top: 0.45rem !important;
+    padding-bottom: 0.65rem !important;
+    padding-left: 0.65rem !important;
+    padding-right: 0.65rem !important;
+    max-width: 100% !important;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+    gap: 0.35rem !important;
 }
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] li,
@@ -184,6 +196,10 @@ section[data-testid="stMain"] [data-testid="stCaption"] {
     color: #f1f5f9 !important;
     -webkit-text-fill-color: #f1f5f9 !important;
     border: 1px solid #475569 !important;
+    min-height: 2.1rem !important;
+    padding: 0.2rem 0.45rem !important;
+    font-size: 0.78rem !important;
+    line-height: 1.2 !important;
 }
 [data-testid="stSidebar"] button[kind="secondary"] p,
 [data-testid="stSidebar"] button[kind="secondary"] span,
@@ -197,6 +213,9 @@ section[data-testid="stMain"] [data-testid="stCaption"] {
     background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
     color: #ffffff !important;
     -webkit-text-fill-color: #ffffff !important;
+    min-height: 2.1rem !important;
+    padding: 0.25rem 0.5rem !important;
+    font-size: 0.8rem !important;
 }
 [data-testid="stSidebar"] button[kind="primary"] p,
 [data-testid="stSidebar"] button[kind="primary"] span,

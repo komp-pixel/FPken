@@ -403,6 +403,141 @@ def _tx_naturaleza_row(r: Any) -> str:
         return "—"
 
 
+def _filter_transactions_by_period(
+    txs: list[dict[str, Any]], d_from: date, d_to: date
+) -> list[dict[str, Any]]:
+    """Mantiene el orden de `txs` (ej. fecha descendente)."""
+    out: list[dict[str, Any]] = []
+    for t in txs:
+        td = t.get("tx_date")
+        if td is None:
+            continue
+        try:
+            d = date.fromisoformat(str(td)[:10])
+        except ValueError:
+            continue
+        if d_from <= d <= d_to:
+            out.append(t)
+    return out
+
+
+def _movements_display_dataframe(
+    txs: list[dict[str, Any]],
+    acc: dict[str, Any],
+    umap: dict[str, str],
+    opts: dict[str, str],
+) -> pd.DataFrame | None:
+    """DataFrame listo para `st.dataframe` (columnas renombradas, montos formateados)."""
+    if not txs:
+        return None
+    df = pd.DataFrame(txs)
+    df["registró"] = df["user_id"].map(lambda x: umap.get(str(x), "—") if pd.notna(x) else "—")
+    for col in (
+        "business",
+        "fee_amount",
+        "transfer_tag",
+        "transaction_notes",
+        "counterpart_account_id",
+        "transfer_group_id",
+    ):
+        if col not in df.columns:
+            df[col] = None
+
+    def _contra_label(cid: Any) -> str:
+        if cid is None or (isinstance(cid, float) and pd.isna(cid)):
+            return "—"
+        s = str(cid).strip()
+        if not s:
+            return "—"
+        return str(opts.get(s, s))[:55]
+
+    df["cuenta_relacionada"] = df["counterpart_account_id"].map(_contra_label)
+    df["naturaleza"] = df.apply(_tx_naturaleza_row, axis=1)
+
+    def _gid_short_cell(x: Any) -> str:
+        if x is None or (isinstance(x, float) and pd.isna(x)):
+            return "—"
+        s = str(x).strip()
+        if not s:
+            return "—"
+        return f"{s[:8]}…" if len(s) > 8 else s
+
+    df["grupo_traspaso"] = df["transfer_group_id"].map(_gid_short_cell)
+    show = df[
+        [
+            "tx_date",
+            "naturaleza",
+            "tx_type",
+            "amount",
+            "business",
+            "category",
+            "cuenta_relacionada",
+            "fee_amount",
+            "transfer_tag",
+            "grupo_traspaso",
+            "description",
+            "registró",
+            "id",
+        ]
+    ].copy()
+    _prec = 6 if str(acc.get("currency")) == "USDT" else 2
+    show["amount"] = show["amount"].apply(lambda x, p=_prec: f"{float(x):,.{p}f}")
+    show["fee_amount"] = show["fee_amount"].apply(
+        lambda x: f"{float(x):,.6f}" if pd.notna(x) and x is not None and float(x) > 0 else "—"
+    )
+    return show.rename(
+        columns={
+            "tx_date": "Fecha",
+            "naturaleza": "Naturaleza",
+            "tx_type": "Tipo",
+            "amount": "Monto",
+            "business": "Negocio",
+            "category": "Rubro",
+            "cuenta_relacionada": "Contraparte",
+            "fee_amount": "Comisión",
+            "transfer_tag": "Etiqueta",
+            "grupo_traspaso": "Grupo",
+            "description": "Descripción",
+            "registró": "Registró",
+            "id": "ID",
+        }
+    )
+
+
+def _movements_dataframe_column_config() -> dict[str, Any]:
+    return {
+        "Fecha": st.column_config.TextColumn("Fecha", width="small"),
+        "Naturaleza": st.column_config.TextColumn("Nat.", width="small"),
+        "Tipo": st.column_config.TextColumn("Tipo", width="small"),
+        "Monto": st.column_config.TextColumn("Monto", width="small"),
+        "Negocio": st.column_config.TextColumn("Negocio", width="medium"),
+        "Rubro": st.column_config.TextColumn("Rubro", width="medium"),
+        "Contraparte": st.column_config.TextColumn("Contraparte", width="medium"),
+        "Comisión": st.column_config.TextColumn("Comis.", width="small"),
+        "Etiqueta": st.column_config.TextColumn("Etiqueta", width="small"),
+        "Grupo": st.column_config.TextColumn("Grupo", width="small"),
+        "Descripción": st.column_config.TextColumn("Descripción", width="large"),
+        "Registró": st.column_config.TextColumn("Registró", width="small"),
+        "ID": st.column_config.TextColumn(
+            "ID",
+            width="small",
+            help="UUID — usar abajo en «Eliminar por UUID»",
+        ),
+    }
+
+
+def _render_movements_dataframe(show: pd.DataFrame, *, max_height: int = 580) -> None:
+    _nrows = len(show)
+    _mov_h = min(max_height, max(220, 36 * _nrows + 52))
+    st.dataframe(
+        show,
+        use_container_width=True,
+        hide_index=True,
+        height=_mov_h,
+        column_config=_movements_dataframe_column_config(),
+    )
+
+
 def _bootstrap_account_result(ok: bool, wmsg: str | None) -> None:
     if ok:
         if wmsg:
@@ -1901,6 +2036,61 @@ Así el **panorama** te muestra **de qué negocio entra** el dinero y **dónde l
         else:
             c4.metric("Saldo ≈ VES", "—", help="Elegí una tasa válida en la barra lateral.")
 
+        st.subheader("📌 Movimientos del periodo · cuenta del lateral")
+        st.caption(
+            "Al tocar **Ingreso**, **Egreso** o **Traspaso** la página se recarga y **se vuelve a mostrar** este listado. "
+            "Así ves el **último movimiento** y podés cruzarlo con el banco."
+        )
+        _mp_a, _mp_b = st.columns(2)
+        with _mp_a:
+            _mov_period_from = st.date_input(
+                "Periodo · desde",
+                value=date.today().replace(day=1),
+                key="kf_mov_period_from",
+            )
+        with _mp_b:
+            _mov_period_to = st.date_input(
+                "Periodo · hasta",
+                value=date.today(),
+                key="kf_mov_period_to",
+            )
+        if _mov_period_from > _mov_period_to:
+            st.warning("«Desde» no puede ser posterior a «Hasta».")
+            txs_period: list[dict[str, Any]] = []
+        else:
+            txs_period = _filter_transactions_by_period(txs, _mov_period_from, _mov_period_to)
+        st.caption(
+            f"**{acc.get('label', '—')}** · **Naturaleza:** ↔ traspaso · ↓ gasto · ↑ ingreso · "
+            "orden **fecha más reciente arriba**."
+        )
+        _show_period = _movements_display_dataframe(txs_period, acc, umap, opts)
+        if _show_period is None:
+            st.info("No hay movimientos en este periodo para esta cuenta.")
+        else:
+            _render_movements_dataframe(_show_period)
+            _r0 = txs_period[0]
+            _p_last = 6 if str(acc.get("currency")) == "USDT" else 2
+            try:
+                _amt0 = float(_r0.get("amount") or 0)
+            except (TypeError, ValueError):
+                _amt0 = 0.0
+            _amt_s = f"{_amt0:,.{_p_last}f}"
+            st.success(
+                f"**Último movimiento en el periodo:** {_r0.get('tx_date', '—')} · "
+                f"{_tx_naturaleza_row(_r0)} · {_amt_s} {acc.get('currency', 'USD')} · "
+                f"{str(_r0.get('description') or '')[:96]}"
+            )
+
+        with st.expander("📜 Historial completo (todas las fechas en esta vista)", expanded=False):
+            st.caption(
+                "Misma cuenta del lateral; hasta **5000** movimientos más recientes cargados desde el servidor."
+            )
+            _show_all = _movements_display_dataframe(txs, acc, umap, opts)
+            if _show_all is None:
+                st.write("Todavía no hay movimientos.")
+            else:
+                _render_movements_dataframe(_show_all)
+
         with st.expander("ℹ️ Ayuda · traspaso vs gasto y cadena Zelle → Bs", expanded=False):
             st.markdown(
                 "**Traspaso** = entre **tus** cuentas (USD→USDT→VES). **No es gasto** del mes en reportes.  \n"
@@ -1929,8 +2119,8 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
             )
 
             st.caption(
-                "**Elegí abajo el tipo** y completá un solo formulario. La **cuenta del lateral** solo filtra el listado de "
-                "movimientos de abajo; al registrar podés elegir **cualquier cuenta** en los selectores."
+                "**Elegí el tipo** y completá el formulario. El **listado del periodo** está **arriba** (cuenta del lateral); "
+                "al cambiar Ingreso/Egreso/Traspaso se recarga y lo ves de nuevo. Al registrar podés elegir **cualquier cuenta**."
             )
             _mov_pick = st.radio(
                 "¿Qué querés registrar?",
@@ -2416,116 +2606,12 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                     "Esos no aparecen en la tabla de arriba; podés borrarlos por UUID."
                 )
 
-        with st.expander("📋 Movimientos de la cuenta · tabla, editar y borrar", expanded=True):
+        with st.expander("✏️🗑 Editar o borrar movimientos", expanded=False):
             st.caption(
-                f"**{acc.get('label', '—')}** · **Naturaleza:** ↔ traspaso · ↓ gasto · ↑ ingreso · "
-                "Orden **fecha reciente primero**. Ordená columnas desde el encabezado."
+                f"**{acc.get('label', '—')}** · la tabla por **periodo** está **arriba**; acá corregís o eliminás (UUID / traspaso completo)."
             )
             if not txs:
-                st.write("Todavía no hay movimientos.")
-            else:
-                df = pd.DataFrame(txs)
-            df["registró"] = df["user_id"].map(lambda x: umap.get(str(x), "—") if pd.notna(x) else "—")
-            for col in (
-                "business",
-                "fee_amount",
-                "transfer_tag",
-                "transaction_notes",
-                "counterpart_account_id",
-                "transfer_group_id",
-            ):
-                if col not in df.columns:
-                    df[col] = None
-
-            def _contra_label(cid: Any) -> str:
-                if cid is None or (isinstance(cid, float) and pd.isna(cid)):
-                    return "—"
-                s = str(cid).strip()
-                if not s:
-                    return "—"
-                return str(opts.get(s, s))[:55]
-
-            df["cuenta_relacionada"] = df["counterpart_account_id"].map(_contra_label)
-            df["naturaleza"] = df.apply(_tx_naturaleza_row, axis=1)
-
-            def _gid_short_cell(x: Any) -> str:
-                if x is None or (isinstance(x, float) and pd.isna(x)):
-                    return "—"
-                s = str(x).strip()
-                if not s:
-                    return "—"
-                return f"{s[:8]}…" if len(s) > 8 else s
-
-            df["grupo_traspaso"] = df["transfer_group_id"].map(_gid_short_cell)
-            show = df[
-                [
-                    "tx_date",
-                    "naturaleza",
-                    "tx_type",
-                    "amount",
-                    "business",
-                    "category",
-                    "cuenta_relacionada",
-                    "fee_amount",
-                    "transfer_tag",
-                    "grupo_traspaso",
-                    "description",
-                    "registró",
-                    "id",
-                ]
-            ].copy()
-            _prec = 6 if str(acc.get("currency")) == "USDT" else 2
-            show["amount"] = show["amount"].apply(
-                lambda x, p=_prec: f"{float(x):,.{p}f}"
-            )
-            show["fee_amount"] = show["fee_amount"].apply(
-                lambda x: f"{float(x):,.6f}" if pd.notna(x) and x is not None and float(x) > 0 else "—"
-            )
-            show = show.rename(
-                columns={
-                    "tx_date": "Fecha",
-                    "naturaleza": "Naturaleza",
-                    "tx_type": "Tipo",
-                    "amount": "Monto",
-                    "business": "Negocio",
-                    "category": "Rubro",
-                    "cuenta_relacionada": "Contraparte",
-                    "fee_amount": "Comisión",
-                    "transfer_tag": "Etiqueta",
-                    "grupo_traspaso": "Grupo",
-                    "description": "Descripción",
-                    "registró": "Registró",
-                    "id": "ID",
-                }
-            )
-            _nrows = len(show)
-            _mov_h = min(580, max(220, 36 * _nrows + 52))
-            _mov_col_cfg: dict[str, Any] = {
-                "Fecha": st.column_config.TextColumn("Fecha", width="small"),
-                "Naturaleza": st.column_config.TextColumn("Nat.", width="small"),
-                "Tipo": st.column_config.TextColumn("Tipo", width="small"),
-                "Monto": st.column_config.TextColumn("Monto", width="small"),
-                "Negocio": st.column_config.TextColumn("Negocio", width="medium"),
-                "Rubro": st.column_config.TextColumn("Rubro", width="medium"),
-                "Contraparte": st.column_config.TextColumn("Contraparte", width="medium"),
-                "Comisión": st.column_config.TextColumn("Comis.", width="small"),
-                "Etiqueta": st.column_config.TextColumn("Etiqueta", width="small"),
-                "Grupo": st.column_config.TextColumn("Grupo", width="small"),
-                "Descripción": st.column_config.TextColumn("Descripción", width="large"),
-                "Registró": st.column_config.TextColumn("Registró", width="small"),
-                "ID": st.column_config.TextColumn(
-                    "ID",
-                    width="small",
-                    help="UUID — usar abajo en «Eliminar por UUID»",
-                ),
-            }
-            st.dataframe(
-                show,
-                use_container_width=True,
-                hide_index=True,
-                height=_mov_h,
-                column_config=_mov_col_cfg,
-            )
+                st.info("Todavía no hay movimientos en esta cuenta.")
 
             _opt_keys_ed = list(opts.keys())
             with st.expander("✏️ Editar movimiento", expanded=False):
@@ -2709,7 +2795,7 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                                 st.error("No se pudo guardar.")
                                 st.code(wmsg_ed or "")
 
-                st.markdown("##### 🗑 Borrar movimientos")
+            st.markdown("##### 🗑 Borrar movimientos")
             st.caption(
                 "Si borrás un **traspaso** por UUID, se eliminan **las dos piernas** (egreso e ingreso) y los saldos se corrigen. "
                 "Traspasos viejos sin `transfer_group_id` en la base hay que borrar **cada pierna** con su UUID (o ejecutá el parche SQL de traspasos)."

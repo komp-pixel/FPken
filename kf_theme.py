@@ -184,6 +184,18 @@ section[data-testid="stMain"] [data-testid="stCaption"] {
     background: linear-gradient(180deg, #e8eef8 0%, #dce4f0 100%) !important;
     border-right: 1px solid #cbd5e1 !important;
     color: #0f172a !important;
+    width: 17rem !important;
+    min-width: 15rem !important;
+}
+[data-testid="stSidebar"] .block-container {
+    padding-top: 0.45rem !important;
+    padding-bottom: 0.65rem !important;
+    padding-left: 0.65rem !important;
+    padding-right: 0.65rem !important;
+    max-width: 100% !important;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+    gap: 0.35rem !important;
 }
 /* Texto generado por st.markdown / st.caption en el lateral */
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
@@ -234,6 +246,10 @@ section[data-testid="stMain"] [data-testid="stCaption"] {
     -webkit-text-fill-color: #0f172a !important;
     border: 1px solid #94a3b8 !important;
     font-weight: 600 !important;
+    min-height: 2.1rem !important;
+    padding: 0.2rem 0.45rem !important;
+    font-size: 0.78rem !important;
+    line-height: 1.2 !important;
 }
 [data-testid="stSidebar"] button[kind="secondary"] p,
 [data-testid="stSidebar"] button[kind="secondary"] span,
@@ -250,6 +266,9 @@ section[data-testid="stMain"] [data-testid="stCaption"] {
     -webkit-text-fill-color: #ffffff !important;
     border: none !important;
     font-weight: 700 !important;
+    min-height: 2.1rem !important;
+    padding: 0.25rem 0.5rem !important;
+    font-size: 0.8rem !important;
 }
 [data-testid="stSidebar"] button[kind="primary"] p,
 [data-testid="stSidebar"] button[kind="primary"] span,
