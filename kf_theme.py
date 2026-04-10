@@ -21,7 +21,7 @@ LUKANA_COMPONENT_CSS = """
 }
 .lk-brand { margin: 0; font-size: 1.55rem; font-weight: 800; color: #0f172a; letter-spacing: -0.035em; line-height: 1.15; }
 .lk-brand em { font-style: normal; color: #2563eb; }
-.lk-subtitle { margin: 0.35rem 0 0 0; font-size: 0.88rem; color: #64748b; font-weight: 500; }
+.lk-subtitle { margin: 0.35rem 0 0 0; font-size: 0.88rem; color: #334155; font-weight: 600; }
 .lk-pill {
     display: inline-flex; align-items: center; height: 2rem; padding: 0 0.9rem;
     background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff !important;
@@ -44,10 +44,10 @@ LUKANA_COMPONENT_CSS = """
 }
 .lk-stat h4 {
     margin: 0; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.1em; color: #64748b;
+    letter-spacing: 0.1em; color: #475569;
 }
 .lk-stat .lk-val { margin: 0.45rem 0 0 0; font-size: 1.32rem; font-weight: 800; color: #0f172a; line-height: 1.15; }
-.lk-stat .lk-foot { margin: 0.35rem 0 0 0; font-size: 0.72rem; color: #94a3b8; font-weight: 500; }
+.lk-stat .lk-foot { margin: 0.35rem 0 0 0; font-size: 0.72rem; color: #64748b; font-weight: 600; }
 .lk-stat-blue {
     background: linear-gradient(145deg, #2563eb 0%, #1e40af 100%);
     border: none;
@@ -66,7 +66,7 @@ LUKANA_COMPONENT_CSS = """
     display: inline-block;
     letter-spacing: -0.02em;
 }
-.lk-hint { font-size: 0.82rem; color: #64748b; margin-top: 0.35rem; }
+.lk-hint { font-size: 0.82rem; color: #334155; font-weight: 500; margin-top: 0.35rem; }
 .lk-page-title {
     font-size: 1.75rem;
     font-weight: 800;
@@ -86,10 +86,62 @@ LUKANA_GLOBAL_CHROME_CSS = """
     padding-top: 1.25rem;
     padding-bottom: 2rem;
 }
-/* Sidebar acorde al panel (sin forzar color de texto en widgets) */
+/* Sidebar: fondo claro + texto siempre legible (Streamlit suele poner gris muy claro) */
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, #e8eef8 0%, #dce4f0 100%) !important;
     border-right: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+}
+/* Texto generado por st.markdown / st.caption en el lateral */
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] li,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] span,
+[data-testid="stSidebar"] [data-testid="stCaption"],
+[data-testid="stSidebar"] [data-testid="stCaption"] p,
+[data-testid="stSidebar"] [data-testid="stCaption"] span {
+    color: #0f172a !important;
+    opacity: 1 !important;
+}
+[data-testid="stSidebar"] [data-testid="stCaption"] {
+    font-weight: 600 !important;
+}
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] label {
+    color: #0f172a !important;
+}
+[data-testid="stSidebar"] .stMarkdown a {
+    color: #1d4ed8 !important;
+    font-weight: 600;
+}
+/* Área principal: captions y ayudas */
+.main [data-testid="stCaption"],
+.main [data-testid="stCaption"] p,
+.main [data-testid="stCaption"] span,
+section[data-testid="stMain"] [data-testid="stCaption"] {
+    color: #334155 !important;
+    opacity: 1 !important;
+    font-weight: 500 !important;
+}
+/* st.caption a veces sin testid según versión */
+.main div[data-testid="stVerticalBlock"] > div > [data-testid="stElementContainer"] small {
+    color: #475569 !important;
+    opacity: 1 !important;
+}
+/* Alertas info/success: cuerpo del mensaje más oscuro */
+div[data-testid="stAlert"] [data-testid="stMarkdownContainer"] p,
+div[data-testid="stAlert"] [data-testid="stMarkdownContainer"] li,
+div[data-testid="stAlert"] [data-testid="stMarkdownContainer"] span {
+    color: #0f172a !important;
+    opacity: 1 !important;
+}
+/* Markdown normal en el cuerpo (evita gris demasiado claro del tema) */
+.main .block-container [data-testid="stMarkdownContainer"] p,
+.main .block-container [data-testid="stMarkdownContainer"] li {
+    color: #1e293b !important;
+}
+.main .block-container [data-testid="stMarkdownContainer"] strong {
+    color: #0f172a !important;
 }
 /* Pestañas principales */
 .stTabs [data-baseweb="tab-list"] {

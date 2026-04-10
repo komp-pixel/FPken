@@ -155,9 +155,9 @@ _CARD_STYLE = """
 }
 .kf-pay-card-wrap .kf-meta {
     font-size: 0.8rem;
-    color: #64748b;
+    color: #475569;
     text-align: right;
-    font-weight: 500;
+    font-weight: 600;
 }
 .kf-pay-card-wrap .kf-balance-strip {
     display: flex;
@@ -178,15 +178,16 @@ _CARD_STYLE = """
 }
 .kf-pay-card-wrap .kf-balance-strip label {
     display: block;
-    font-size: 0.68rem;
+    font-size: 0.74rem;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 700;
-    margin-bottom: 0.2rem;
-    color: #64748b;
+    letter-spacing: 0.06em;
+    font-weight: 800;
+    margin-bottom: 0.25rem;
+    color: #1e293b;
 }
 .kf-pay-card-wrap .kf-balance-strip.kf-banco label {
-    color: rgba(255,255,255,0.85);
+    color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.25);
 }
 .kf-pay-card-wrap .kf-balance-amt {
     font-size: 1.2rem;
@@ -200,12 +201,14 @@ _CARD_STYLE = """
 .kf-pay-card-wrap .kf-bal-pos { color: #15803d !important; }
 .kf-pay-card-wrap .kf-bal-neg { color: #b91c1c !important; }
 .kf-pay-card-wrap .kf-balance-date {
-    font-size: 0.78rem;
-    color: #94a3b8;
-    font-weight: 600;
+    font-size: 0.82rem;
+    color: #475569;
+    font-weight: 700;
 }
 .kf-pay-card-wrap .kf-balance-strip.kf-banco .kf-balance-date {
-    color: rgba(255,255,255,0.9);
+    color: #ffffff !important;
+    font-weight: 700;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 .kf-pay-card-wrap .kf-grid {
     display: grid;
@@ -217,9 +220,9 @@ _CARD_STYLE = """
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    color: #94a3b8;
+    color: #64748b;
     margin-bottom: 0.2rem;
-    font-weight: 600;
+    font-weight: 700;
 }
 .kf-pay-card-wrap .kf-fld span {
     font-size: 0.95rem;
