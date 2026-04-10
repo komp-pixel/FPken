@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -262,6 +263,21 @@ def render_finance_dashboard(
                 return None
             return f"{((new_v - old_v) / abs(old_v) * 100):+.1f}% vs mes ant."
 
+        def _month_compare_foot(new_v: float, old_v: float) -> str:
+            """HTML pie de tarjeta: % vs mes ant. + referencia (texto oscuro vía lk-*)."""
+            cur_e = html.escape(str(currency))
+            d = _pct_delta(new_v, old_v)
+            if d is None:
+                return (
+                    f'<p class="lk-foot">Mes anterior: {old_v:,.2f} {cur_e} '
+                    f"(sin % de cambio)</p>"
+                )
+            cls = "lk-pos" if d.startswith("+") else "lk-neg"
+            return (
+                f'<p class="lk-foot {cls}" style="font-weight:700;">{html.escape(d)}</p>'
+                f'<p class="lk-foot">Ant.: {old_v:,.2f} {cur_e}</p>'
+            )
+
         st.markdown(
             '<p class="lk-section">Mes en curso vs mes anterior</p>',
             unsafe_allow_html=True,
@@ -270,28 +286,22 @@ def render_finance_dashboard(
             f"{first_m.isoformat()} → {today.isoformat()} · comparado con "
             f"{first_pm.isoformat()} → {last_pm.isoformat()}"
         )
-        v1, v2, v3 = st.columns(3)
-        with v1:
-            st.metric(
-                "Ingresos (mes)",
-                f"{ing_c:,.2f}",
-                delta=_pct_delta(ing_c, ing_p),
-                help=f"Anterior: {ing_p:,.2f} {currency}",
-            )
-        with v2:
-            st.metric(
-                "Egresos (mes)",
-                f"{egr_c:,.2f}",
-                delta=_pct_delta(egr_c, egr_p),
-                help=f"Anterior: {egr_p:,.2f} {currency}",
-            )
-        with v3:
-            st.metric(
-                "Ahorro / neto (mes)",
-                f"{net_c:,.2f}",
-                delta=_pct_delta(net_c, net_p),
-                help=f"Anterior: {net_p:,.2f} {currency}",
-            )
+        cur_e = html.escape(str(currency))
+        _net_cls = "lk-pos" if net_c >= 0 else "lk-neg"
+        st.markdown(
+            f'<div class="lk-grid" style="margin-top:0.65rem;">'
+            f'<div class="lk-stat"><h4>Ingresos (mes)</h4>'
+            f'<p class="lk-val">{ing_c:,.2f} {cur_e}</p>'
+            f"{_month_compare_foot(ing_c, ing_p)}</div>"
+            f'<div class="lk-stat"><h4>Egresos (mes)</h4>'
+            f'<p class="lk-val">{egr_c:,.2f} {cur_e}</p>'
+            f"{_month_compare_foot(egr_c, egr_p)}</div>"
+            f'<div class="lk-stat"><h4>Ahorro / neto (mes)</h4>'
+            f'<p class="lk-val {_net_cls}">{net_c:,.2f} {cur_e}</p>'
+            f"{_month_compare_foot(net_c, net_p)}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
     st.divider()
     st.markdown(

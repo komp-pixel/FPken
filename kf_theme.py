@@ -107,8 +107,26 @@ LUKANA_GLOBAL_CHROME_CSS = """
 }
 [data-testid="stSidebar"] label,
 [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
-[data-testid="stSidebar"] [data-testid="stWidgetLabel"] label {
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] label,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] span {
     color: #0f172a !important;
+    opacity: 1 !important;
+}
+/* Selectores / desplegables en el lateral (texto a menudo gris claro) */
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="select"] span,
+[data-testid="stSidebar"] [data-baseweb="input"] input,
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] * {
+    color: #0f172a !important;
+    opacity: 1 !important;
+    -webkit-text-fill-color: #0f172a !important;
+}
+[data-testid="stSidebar"] details summary,
+[data-testid="stSidebar"] [data-testid="stExpander"] summary,
+[data-testid="stSidebar"] [data-testid="stExpander"] summary span {
+    color: #0f172a !important;
+    font-weight: 600 !important;
+    opacity: 1 !important;
 }
 [data-testid="stSidebar"] .stMarkdown a {
     color: #1d4ed8 !important;
@@ -155,13 +173,53 @@ div[data-testid="stAlert"] [data-testid="stMarkdownContainer"] span {
     border-radius: 8px;
     font-weight: 600;
 }
-/* Métricas tipo tarjeta */
+/* Métricas tipo tarjeta + valor SIEMPRE oscuro (Streamlit a veces deja el número casi blanco) */
 div[data-testid="stMetric"] {
-    background: #fff;
+    background: #fff !important;
     border: 1px solid #f1f5f9;
     border-radius: 14px;
     padding: 0.65rem 0.85rem;
     box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+    color: #0f172a !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"],
+div[data-testid="stMetric"] [data-testid="stMetricValue"] *,
+div[data-testid="stMetric"] [data-testid="stMarkdownContainer"] p {
+    color: #0f172a !important;
+    opacity: 1 !important;
+    -webkit-text-fill-color: #0f172a !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricLabel"] p,
+div[data-testid="stMetric"] [data-testid="stMetricLabel"] label,
+div[data-testid="stMetric"] [data-testid="stMetricLabel"] span {
+    color: #334155 !important;
+    font-weight: 600 !important;
+    opacity: 1 !important;
+}
+/* Delta: mantener verde / rojo del tema */
+div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
+    opacity: 1 !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricDelta"] svg {
+    opacity: 1 !important;
+}
+/* Área principal: mismos fixes para métricas fuera de columnas raras */
+.main div[data-testid="stMetric"] [data-testid="stMetricValue"],
+.main div[data-testid="stMetric"] [data-testid="stMetricValue"] * {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+}
+/* Selectores y widgets en el cuerpo (ej. «Vista rápida» en dashboard) */
+.main [data-testid="stWidgetLabel"] p,
+.main [data-testid="stWidgetLabel"] label {
+    color: #1e293b !important;
+    font-weight: 600 !important;
+    opacity: 1 !important;
+}
+.main [data-baseweb="select"] > div,
+.main .stSelectbox [data-baseweb="select"] span {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
 }
 /* Alertas más suaves */
 div[data-testid="stAlert"] {
