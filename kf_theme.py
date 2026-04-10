@@ -1,4 +1,9 @@
-"""Estilos globales tipo Lukana: lienzo claro, acento azul, tarjetas y tipografía."""
+"""Estilos globales tipo Lukana: lienzo claro, acento azul, tarjetas y tipografía.
+
+Regla de producto: **tema de fondo claro → todo el texto legible en tonos oscuros**
+(#0f172a–#334155). Excepciones explícitas: tarjeta KPI azul (.lk-stat-blue), pastilla
+moneda (.lk-pill), botones primary, franja saldo banco (.kf-banco), enlaces azules.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +26,7 @@ LUKANA_COMPONENT_CSS = """
 }
 .lk-brand { margin: 0; font-size: 1.55rem; font-weight: 800; color: #0f172a; letter-spacing: -0.035em; line-height: 1.15; }
 .lk-brand em { font-style: normal; color: #2563eb; }
-.lk-subtitle { margin: 0.35rem 0 0 0; font-size: 0.88rem; color: #334155; font-weight: 600; }
+.lk-subtitle { margin: 0.35rem 0 0 0; font-size: 0.88rem; color: #1e293b; font-weight: 600; }
 .lk-pill {
     display: inline-flex; align-items: center; height: 2rem; padding: 0 0.9rem;
     background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff !important;
@@ -47,7 +52,7 @@ LUKANA_COMPONENT_CSS = """
     letter-spacing: 0.1em; color: #475569;
 }
 .lk-stat .lk-val { margin: 0.45rem 0 0 0; font-size: 1.32rem; font-weight: 800; color: #0f172a; line-height: 1.15; }
-.lk-stat .lk-foot { margin: 0.35rem 0 0 0; font-size: 0.72rem; color: #64748b; font-weight: 600; }
+.lk-stat .lk-foot { margin: 0.35rem 0 0 0; font-size: 0.72rem; color: #475569; font-weight: 600; }
 .lk-stat-blue {
     background: linear-gradient(145deg, #2563eb 0%, #1e40af 100%);
     border: none;
@@ -66,7 +71,7 @@ LUKANA_COMPONENT_CSS = """
     display: inline-block;
     letter-spacing: -0.02em;
 }
-.lk-hint { font-size: 0.82rem; color: #334155; font-weight: 500; margin-top: 0.35rem; }
+.lk-hint { font-size: 0.82rem; color: #1e293b; font-weight: 600; margin-top: 0.35rem; }
 /* Subtítulos dentro del dashboard (metas, etc.) — nunca color tema claro */
 .lk-panel-h {
     margin: 0 0 0.5rem 0;
@@ -98,6 +103,32 @@ LUKANA_COMPONENT_CSS = """
 .lk-balance-cards-wrap .lk-stat .lk-val {
     font-size: 1.2rem;
 }
+
+/* Excepciones con mayor especificidad que la regla global del main (texto claro sobre azul) */
+section[data-testid="stMain"] .lk-stat-blue h4 {
+    color: rgba(255, 255, 255, 0.92) !important;
+    -webkit-text-fill-color: rgba(255, 255, 255, 0.92) !important;
+}
+section[data-testid="stMain"] .lk-stat-blue .lk-val {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+section[data-testid="stMain"] .lk-stat-blue .lk-foot {
+    color: rgba(255, 255, 255, 0.9) !important;
+    -webkit-text-fill-color: rgba(255, 255, 255, 0.9) !important;
+}
+section[data-testid="stMain"] .lk-pill {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+section[data-testid="stMain"] .lk-pos {
+    color: #15803d !important;
+    -webkit-text-fill-color: #15803d !important;
+}
+section[data-testid="stMain"] .lk-neg {
+    color: #b91c1c !important;
+    -webkit-text-fill-color: #b91c1c !important;
+}
 """
 
 LUKANA_GLOBAL_CHROME_CSS = """
@@ -109,6 +140,8 @@ LUKANA_GLOBAL_CHROME_CSS = """
     padding-top: 1.25rem;
     padding-bottom: 2rem;
     color-scheme: light;
+    color: #1e293b !important;
+    -webkit-text-fill-color: #1e293b !important;
 }
 /* Subtítulo bajo el título principal: bien oscuro */
 .main [data-testid="stCaption"],
@@ -372,6 +405,70 @@ section[data-testid="stMain"] .stMarkdown h6 {
 }
 [data-testid="stDataFrame"] > div {
     background-color: #ffffff !important;
+}
+
+/* =============================================================================
+   Tema claro obligatorio: copia oscura en main (Streamlit a veces inyecta gris/blanco).
+   Va al final del bloque global; las clases .lk-*/.kf-* en LUKANA_COMPONENT_CSS
+   pueden sumar !important para excepciones (azul, pill, etc.).
+   ============================================================================= */
+section[data-testid="stMain"] .block-container {
+    color: #1e293b !important;
+    -webkit-text-fill-color: #1e293b !important;
+}
+/* Markdown Streamlit: color base oscuro (hereda; no listar `p` sueltos: rompería .lk-stat-blue) */
+section[data-testid="stMain"] .block-container [data-testid="stMarkdownContainer"] {
+    color: #1e293b !important;
+    -webkit-text-fill-color: #1e293b !important;
+}
+section[data-testid="stMain"] .block-container [data-testid="stCaption"],
+section[data-testid="stMain"] .block-container [data-testid="stCaption"] p,
+section[data-testid="stMain"] .block-container [data-testid="stCaption"] span {
+    color: #1e293b !important;
+    -webkit-text-fill-color: #1e293b !important;
+    opacity: 1 !important;
+}
+section[data-testid="stMain"] .block-container [data-testid="stMarkdownContainer"] a,
+section[data-testid="stMain"] .block-container a {
+    color: #1d4ed8 !important;
+    -webkit-text-fill-color: #1d4ed8 !important;
+    font-weight: 600 !important;
+}
+section[data-testid="stMain"] .block-container input,
+section[data-testid="stMain"] .block-container textarea,
+section[data-testid="stMain"] .block-container [data-baseweb="input"] input,
+section[data-testid="stMain"] .block-container [data-baseweb="textarea"] textarea {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+}
+/* Botones en el cuerpo: secondary = blanco + texto oscuro (igual que sidebar) */
+section[data-testid="stMain"] button[kind="secondary"],
+section[data-testid="stMain"] [data-testid="baseButton-secondary"] {
+    background-color: #ffffff !important;
+    background-image: none !important;
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+    border: 1px solid #94a3b8 !important;
+    font-weight: 600 !important;
+}
+section[data-testid="stMain"] button[kind="secondary"] p,
+section[data-testid="stMain"] button[kind="secondary"] span,
+section[data-testid="stMain"] [data-testid="baseButton-secondary"] p,
+section[data-testid="stMain"] [data-testid="baseButton-secondary"] span {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+}
+section[data-testid="stMain"] button[kind="primary"],
+section[data-testid="stMain"] [data-testid="baseButton-primary"] {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+section[data-testid="stMain"] button[kind="primary"] p,
+section[data-testid="stMain"] button[kind="primary"] span,
+section[data-testid="stMain"] [data-testid="baseButton-primary"] p,
+section[data-testid="stMain"] [data-testid="baseButton-primary"] span {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
 }
 """
 
