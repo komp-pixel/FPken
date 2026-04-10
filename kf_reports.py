@@ -1424,10 +1424,10 @@ def render_reports_page(
                 [
                     str(p.get("fecha", ""))[:10],
                     str(p.get("desde", ""))[:16],
-                    f'{float(p.get("sale") or 0):,.4f}',
+                    f'{float(p.get("sale") or 0):,.2f}',
                     str(p.get("mon_sale", ""))[:4],
                     str(p.get("hacia", ""))[:16],
-                    f'{float(p.get("entra") or 0):,.4f}',
+                    f'{float(p.get("entra") or 0):,.2f}',
                     str(p.get("mon_entra", ""))[:4],
                     str(p.get("descripcion", ""))[:26],
                 ]
@@ -1440,10 +1440,10 @@ def render_reports_page(
                 [
                     str(t.get("tx_date", ""))[:10],
                     str(acc.get("label", ""))[:14] if is_eg else "—",
-                    f'{float(t.get("amount") or 0):,.4f}' if is_eg else "—",
+                    f'{float(t.get("amount") or 0):,.2f}' if is_eg else "—",
                     str(acc.get("currency", "?"))[:4],
                     str(acc.get("label", ""))[:14] if not is_eg else "—",
-                    f'{float(t.get("amount") or 0):,.4f}' if not is_eg else "—",
+                    f'{float(t.get("amount") or 0):,.2f}' if not is_eg else "—",
                     str(acc.get("currency", "?"))[:4],
                     f'sin grupo · {str(t.get("transfer_tag") or "")[:12]}',
                 ]

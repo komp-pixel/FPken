@@ -362,12 +362,12 @@ def _transfer_group_row(
     md = _account_currency_lookup(accounts or [], inn.get("account_id") if inn else None)
     if out and inn:
         cadena_txt = (
-            f"{out_acc} ({mo}) −{out_amt:,.4f} → {in_acc} ({md}) +{in_amt:,.4f}"
+            f"{out_acc} ({mo}) −{out_amt:,.2f} → {in_acc} ({md}) +{in_amt:,.2f}"
         )
     elif out:
-        cadena_txt = f"{out_acc} ({mo}) solo egreso −{out_amt:,.4f}"
+        cadena_txt = f"{out_acc} ({mo}) solo egreso −{out_amt:,.2f}"
     elif inn:
-        cadena_txt = f"{in_acc} ({md}) solo ingreso +{in_amt:,.4f}"
+        cadena_txt = f"{in_acc} ({md}) solo ingreso +{in_amt:,.2f}"
     else:
         cadena_txt = "—"
     return {
@@ -499,10 +499,9 @@ def _movements_display_dataframe(
             "id",
         ]
     ].copy()
-    _prec = 6 if str(acc.get("currency")) == "USDT" else 2
-    show["amount"] = show["amount"].apply(lambda x, p=_prec: f"{float(x):,.{p}f}")
+    show["amount"] = show["amount"].apply(lambda x: f"{float(x):,.2f}")
     show["fee_amount"] = show["fee_amount"].apply(
-        lambda x: f"{float(x):,.6f}" if pd.notna(x) and x is not None and float(x) > 0 else "—"
+        lambda x: f"{float(x):,.2f}" if pd.notna(x) and x is not None and float(x) > 0 else "—"
     )
     return show.rename(
         columns={
@@ -569,9 +568,8 @@ def _bootstrap_account_result(ok: bool, wmsg: str | None) -> None:
         st.code(wmsg or "")
 
 
-def _amount_input_format(currency: str) -> tuple[float, str]:
-    if currency == "USDT":
-        return 0.000001, "%.6f"
+def _amount_input_format(_currency: str) -> tuple[float, str]:
+    """Paso y formato para montos (ingreso/egreso/traspaso): siempre 2 decimales."""
     return 0.01, "%.2f"
 
 
@@ -2086,7 +2084,7 @@ Así el **panorama** te muestra **de qué negocio entra** el dinero y **dónde l
         else:
             _render_movements_dataframe(_show_period)
             _r0 = txs_period_view[0]
-            _p_last = 6 if str(acc.get("currency")) == "USDT" else 2
+            _p_last = 2
             try:
                 _amt0 = float(_r0.get("amount") or 0)
             except (TypeError, ValueError):
@@ -2179,7 +2177,7 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                     amount = st.number_input(
                         f"Monto ({_acur_in})",
                         min_value=float(_step_in),
-                        value=10.0 if _acur_in != "USDT" else 0.01,
+                        value=10.0,
                         step=float(_step_in),
                         format=_fmt_in,
                         key="txin_amt",
@@ -2259,7 +2257,7 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                     amount = st.number_input(
                         f"Monto ({_acur_out})",
                         min_value=float(_step_out),
-                        value=10.0 if _acur_out != "USDT" else 0.01,
+                        value=10.0,
                         step=float(_step_out),
                         format=_fmt_out,
                         key="txout_amt",
@@ -2358,8 +2356,8 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                     if cur_fr == cur_to:
                         m_rec = st.number_input(
                             f"Monto que **entra** en destino ({cur_to})",
-                            min_value=0.00000001,
-                            value=10.0 if cur_to != "USDT" else 0.01,
+                            min_value=0.01,
+                            value=10.0,
                             step=_amount_input_format(cur_to)[0],
                             format=_amount_input_format(cur_to)[1],
                             key="txtr_rec",
@@ -2386,8 +2384,8 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                         m_send = float(
                             st.number_input(
                                 f"Monto que **sale** del origen ({cur_fr}) — incluí fees del camino si querés",
-                                min_value=0.00000001,
-                                value=10.0 if cur_fr != "USDT" else 0.01,
+                                min_value=0.01,
+                                value=10.0,
                                 step=_amount_input_format(cur_fr)[0],
                                 format=_amount_input_format(cur_fr)[1],
                                 key="txtr_send",
@@ -2397,8 +2395,8 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                             m_rec = float(
                                 st.number_input(
                                     f"Monto que **entra** al destino ({cur_to})",
-                                    min_value=0.00000001,
-                                    value=10.0 if cur_to != "USDT" else 0.01,
+                                    min_value=0.01,
+                                    value=10.0,
                                     step=_amount_input_format(cur_to)[0],
                                     format=_amount_input_format(cur_to)[1],
                                     key="txtr_recv",
@@ -2431,7 +2429,7 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                                 )
                             )
                             m_rec = m_send * rate
-                            _mr = f"{m_rec:,.6f}" if cur_to == "USDT" else f"{m_rec:,.2f}"
+                            _mr = f"{m_rec:,.2f}"
                             st.success(
                                 f"En **{acc_to.get('label') or 'destino'}** entrará **{_mr} {cur_to}** "
                                 f"(= {m_send:g} {cur_fr} × {rate:g})."
@@ -2601,13 +2599,13 @@ En la tabla: **Naturaleza** = ↔ traspaso · ↓ gasto · ↑ ingreso. **Vista 
                     ]
                 ].copy()
                 _df_show["egreso"] = _df_show["egreso"].map(
-                    lambda x: "—" if pd.isna(x) else f"{float(x):,.4f}"
+                    lambda x: "—" if pd.isna(x) else f"{float(x):,.2f}"
                 )
                 _df_show["ingreso"] = _df_show["ingreso"].map(
-                    lambda x: "—" if pd.isna(x) else f"{float(x):,.4f}"
+                    lambda x: "—" if pd.isna(x) else f"{float(x):,.2f}"
                 )
                 _df_show["diferencia"] = _df_show["diferencia"].map(
-                    lambda x: "—" if pd.isna(x) else f"{float(x):+,.4f}"
+                    lambda x: "—" if pd.isna(x) else f"{float(x):+,.2f}"
                 )
                 _df_show = _df_show.rename(
                     columns={
