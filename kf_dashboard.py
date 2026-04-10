@@ -358,7 +358,10 @@ def render_finance_dashboard(
 
         colg1, colg2 = st.columns(2)
         with colg1:
-            st.markdown("##### Meta de ahorro")
+            st.markdown(
+                '<p class="lk-panel-h">Meta de ahorro</p>',
+                unsafe_allow_html=True,
+            )
             if target_save and target_save > 0:
                 prog = max(0.0, min(1.0, net_g / target_save)) if target_save else 0.0
                 st.progress(prog)
@@ -372,7 +375,10 @@ def render_finance_dashboard(
                 st.caption("Sin meta configurada para este mes/moneda.")
 
         with colg2:
-            st.markdown("##### Fondo de emergencia")
+            st.markdown(
+                '<p class="lk-panel-h">Fondo de emergencia</p>',
+                unsafe_allow_html=True,
+            )
             if em_acc and em_tgt > 0 and str(account_id) == em_acc:
                 prog_e = max(0.0, min(1.0, bal / em_tgt))
                 st.progress(prog_e)
@@ -388,7 +394,10 @@ def render_finance_dashboard(
                 st.caption("Sin fondo de emergencia configurado.")
 
         if budgets:
-            st.markdown(f"##### Presupuesto por rubro (mes {goal_ym})")
+            st.markdown(
+                f'<p class="lk-panel-h">Presupuesto por rubro (mes {html.escape(goal_ym)})</p>',
+                unsafe_allow_html=True,
+            )
             for b in budgets:
                 cat = str(b.get("category", ""))
                 lim = float(b.get("budget_limit") or 0)
@@ -633,7 +642,10 @@ def render_finance_dashboard(
             )
         c_s1, c_s2 = st.columns(2)
         with c_s1:
-            st.markdown("##### Ingresos por negocio")
+            st.markdown(
+                '<p class="lk-panel-h">Ingresos por negocio</p>',
+                unsafe_allow_html=True,
+            )
             ing_df2 = dff_flow[dff_flow["tx_type"] == "ingreso"].copy()
             ing_df2["business"] = ing_df2["business"].fillna("(sin negocio)")
             if ing_df2.empty:
@@ -658,7 +670,10 @@ def render_finance_dashboard(
                     hide_index=True,
                 )
         with c_s2:
-            st.markdown("##### Gastos por categoría")
+            st.markdown(
+                '<p class="lk-panel-h">Gastos por categoría</p>',
+                unsafe_allow_html=True,
+            )
             cat_df2 = dff_flow[dff_flow["tx_type"] == "egreso"].copy()
             cat_df2["category"] = cat_df2["category"].fillna("(sin categoría)")
             if cat_df2.empty:

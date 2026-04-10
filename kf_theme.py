@@ -67,6 +67,15 @@ LUKANA_COMPONENT_CSS = """
     letter-spacing: -0.02em;
 }
 .lk-hint { font-size: 0.82rem; color: #334155; font-weight: 500; margin-top: 0.35rem; }
+/* Subtítulos dentro del dashboard (metas, etc.) — nunca color tema claro */
+.lk-panel-h {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #0f172a !important;
+    letter-spacing: -0.02em;
+    -webkit-text-fill-color: #0f172a !important;
+}
 .lk-page-title {
     font-size: 1.75rem;
     font-weight: 800;
@@ -281,6 +290,80 @@ div[data-testid="stAlert"] {
     }
 }
 div[data-testid="stVerticalBlock"] button { min-height: 2.75rem; }
+/* Encabezados markdown Streamlit (##### etc.): forzar oscuro en el cuerpo principal */
+section[data-testid="stMain"] h1,
+section[data-testid="stMain"] h2,
+section[data-testid="stMain"] h3,
+section[data-testid="stMain"] h4,
+section[data-testid="stMain"] h5,
+section[data-testid="stMain"] h6,
+section[data-testid="stMain"] .stMarkdown h1,
+section[data-testid="stMain"] .stMarkdown h2,
+section[data-testid="stMain"] .stMarkdown h3,
+section[data-testid="stMain"] .stMarkdown h4,
+section[data-testid="stMain"] .stMarkdown h5,
+section[data-testid="stMain"] .stMarkdown h6 {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+    opacity: 1 !important;
+}
+/* Contenido dentro de pestañas (Cumplimiento, Gastos…): captions y texto gris ilegible → oscuro */
+[data-baseweb="tab-panel"] [data-testid="stCaption"],
+[data-baseweb="tab-panel"] [data-testid="stCaption"] p,
+[data-baseweb="tab-panel"] [data-testid="stCaption"] span,
+[data-baseweb="tab-panel"] [data-testid="stMarkdownContainer"] p,
+[data-baseweb="tab-panel"] [data-testid="stMarkdownContainer"] li,
+[data-baseweb="tab-panel"] [data-testid="stMarkdownContainer"] span:not(a span) {
+    color: #1e293b !important;
+    opacity: 1 !important;
+    -webkit-text-fill-color: #1e293b !important;
+    font-weight: 500 !important;
+}
+[data-baseweb="tab-panel"] [data-testid="stWidgetLabel"] p,
+[data-baseweb="tab-panel"] [data-testid="stWidgetLabel"] label {
+    color: #0f172a !important;
+    opacity: 1 !important;
+}
+/* Variante DOM de pestañas (Streamlit / Base Web) */
+[role="tabpanel"] [data-testid="stCaption"],
+[role="tabpanel"] [data-testid="stCaption"] p,
+[role="tabpanel"] [data-testid="stCaption"] span {
+    color: #1e293b !important;
+    opacity: 1 !important;
+    -webkit-text-fill-color: #1e293b !important;
+    font-weight: 600 !important;
+}
+/* Expander «Configurar metas…»: título y texto interior */
+[data-testid="stExpander"] details summary,
+[data-testid="stExpander"] details summary span,
+[data-testid="stExpander"] summary {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+    font-weight: 600 !important;
+    opacity: 1 !important;
+}
+[data-testid="stExpander"] [data-testid="stCaption"],
+[data-testid="stExpander"] [data-testid="stCaption"] p,
+[data-testid="stExpander"] [data-testid="stCaption"] span,
+[data-testid="stExpander"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stExpander"] [data-testid="stMarkdownContainer"] li {
+    color: #334155 !important;
+    opacity: 1 !important;
+    -webkit-text-fill-color: #334155 !important;
+}
+[data-testid="stExpander"] [data-testid="stWidgetLabel"] p,
+[data-testid="stExpander"] label {
+    color: #0f172a !important;
+}
+/* Columnas (metas / dos columnas): captions legibles */
+[data-testid="column"] [data-testid="stCaption"],
+[data-testid="column"] [data-testid="stCaption"] p,
+[data-testid="column"] [data-testid="stCaption"] span {
+    color: #334155 !important;
+    font-weight: 600 !important;
+    opacity: 1 !important;
+    -webkit-text-fill-color: #334155 !important;
+}
 /* Tablas interactivas: pedir tema claro al navegador y fondo blanco en el contenedor */
 [data-testid="stDataFrame"] {
     background: #ffffff !important;
