@@ -36,7 +36,7 @@ from kf_dashboard import render_finance_dashboard
 from kf_fx_convert import all_balances_native, all_balances_with_ves, resolve_ves_rates, to_ves
 from kf_p2p_binance import render_usdt_ves_p2p_reference
 from kf_reports import render_reports_page
-from kf_theme import inject_lukana_theme
+from kf_theme import inject_lukana_theme, render_theme_picker_sidebar
 
 
 def _pick_list_value(selected: str, other_text: str) -> str | None:
@@ -1518,6 +1518,8 @@ def main() -> None:
     account_owner_id = str(user["id"])
 
     with st.sidebar:
+        render_theme_picker_sidebar()
+        st.divider()
         st.markdown(f"**{user['display_name']}**  \n`{user['username']}`")
         if st.button("Cerrar sesión", type="primary", use_container_width=True):
             logout()

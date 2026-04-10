@@ -13,6 +13,7 @@ import streamlit as st
 from supabase import Client
 
 from kf_constants import EXPENSE_CATEGORIES
+from kf_theme import is_dark_theme
 from kf_goals import (
     clear_savings_goal,
     delete_category_budget,
@@ -538,15 +539,26 @@ def render_finance_dashboard(
         ]
     )
 
-    layout = dict(
-        template="plotly_white",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="#f8fafc",
-        font=dict(color="#334155", family="system-ui, -apple-system, sans-serif", size=13),
-        margin=dict(l=48, r=28, t=52, b=44),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    )
-    _axis_style = dict(gridcolor="#e2e8f0", linecolor="#cbd5e1", showgrid=True)
+    if is_dark_theme():
+        layout = dict(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#1e293b",
+            font=dict(color="#e2e8f0", family="system-ui, -apple-system, sans-serif", size=13),
+            margin=dict(l=48, r=28, t=52, b=44),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+        _axis_style = dict(gridcolor="#334155", linecolor="#475569", showgrid=True)
+    else:
+        layout = dict(
+            template="plotly_white",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#f8fafc",
+            font=dict(color="#334155", family="system-ui, -apple-system, sans-serif", size=13),
+            margin=dict(l=48, r=28, t=52, b=44),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+        _axis_style = dict(gridcolor="#e2e8f0", linecolor="#cbd5e1", showgrid=True)
 
     with tab_met:
         st.caption(

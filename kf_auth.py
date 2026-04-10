@@ -247,6 +247,22 @@ def gate_auth(sb: Client) -> dict[str, Any] | None:
     )
     st.caption("Iniciá sesión para ver movimientos y el tablero.")
 
+    from kf_theme import KF_THEME_KEY, THEME_DARK, THEME_LIGHT
+
+    st.session_state.setdefault(KF_THEME_KEY, THEME_LIGHT)
+    _t_idx = 1 if st.session_state[KF_THEME_KEY] == THEME_DARK else 0
+    _t_choice = st.radio(
+        "Tema visual",
+        ["Claro", "Oscuro"],
+        index=_t_idx,
+        horizontal=True,
+        key="kf_auth_theme_radio",
+    )
+    _t_want = THEME_DARK if _t_choice == "Oscuro" else THEME_LIGHT
+    if _t_want != st.session_state[KF_THEME_KEY]:
+        st.session_state[KF_THEME_KEY] = _t_want
+        st.rerun()
+
     try:
         n = count_users(sb)
     except Exception:

@@ -9,6 +9,8 @@ from decimal import Decimal
 import streamlit as st
 
 from kf_constants import ACCOUNT_KIND_LABELS
+from kf_theme import is_dark_theme
+from kf_theme_dark import DARK_KF_ACCOUNT_CARDS_CSS
 
 
 def infer_account_kind(acc: dict) -> str:
@@ -341,6 +343,11 @@ def render_payment_method_cards(
     )
 
     st.markdown(_CARD_STYLE, unsafe_allow_html=True)
+    if is_dark_theme():
+        st.markdown(
+            f"<style>{DARK_KF_ACCOUNT_CARDS_CSS}</style>",
+            unsafe_allow_html=True,
+        )
 
     ordered = sorted(accounts, key=_label_sort_key)
     for acc in ordered:

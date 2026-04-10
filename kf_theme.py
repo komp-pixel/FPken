@@ -1,13 +1,40 @@
-"""Estilos globales tipo Lukana: lienzo claro, acento azul, tarjetas y tipografía.
+"""Estilos globales tipo Lukana: tema claro (por defecto) y tema oscuro opcional.
 
-Regla de producto: **tema de fondo claro → todo el texto legible en tonos oscuros**
-(#0f172a–#334155). Excepciones explícitas: tarjeta KPI azul (.lk-stat-blue), pastilla
-moneda (.lk-pill), botones primary, franja saldo banco (.kf-banco), enlaces azules.
+- **Claro:** texto oscuro sobre lienzo claro (ver comentarios en CSS).
+- **Oscuro:** `kf_theme_dark.py` + selector en el lateral (`render_theme_picker_sidebar`).
 """
 
 from __future__ import annotations
 
 import streamlit as st
+
+from kf_theme_dark import DARK_COMPONENT_CSS, DARK_GLOBAL_CHROME_CSS
+
+KF_THEME_KEY = "kf_ui_theme"
+THEME_LIGHT = "light"
+THEME_DARK = "dark"
+
+
+def is_dark_theme() -> bool:
+    return str(st.session_state.get(KF_THEME_KEY, THEME_LIGHT)).lower() == THEME_DARK
+
+
+def render_theme_picker_sidebar() -> None:
+    """Selector Claro / Oscuro; debe llamarse dentro de `st.sidebar`."""
+    st.session_state.setdefault(KF_THEME_KEY, THEME_LIGHT)
+    cur = st.session_state[KF_THEME_KEY]
+    opts = ("Claro", "Oscuro")
+    choice = st.radio(
+        "Tema visual",
+        opts,
+        index=1 if cur == THEME_DARK else 0,
+        horizontal=True,
+        key="kf_theme_radio_sidebar",
+    )
+    want = THEME_DARK if choice == "Oscuro" else THEME_LIGHT
+    if want != st.session_state[KF_THEME_KEY]:
+        st.session_state[KF_THEME_KEY] = want
+        st.rerun()
 
 # Componentes reutilizables (dashboard, métricas HTML, etc.)
 LUKANA_COMPONENT_CSS = """
@@ -474,8 +501,10 @@ section[data-testid="stMain"] [data-testid="baseButton-primary"] span {
 
 
 def inject_lukana_theme() -> None:
-    """Inyecta CSS global una vez por página (llamar tras set_page_config / login)."""
-    st.markdown(
-        f"<style>{LUKANA_GLOBAL_CHROME_CSS}\n{LUKANA_COMPONENT_CSS}</style>",
-        unsafe_allow_html=True,
-    )
+    """Inyecta CSS según `st.session_state[kf_ui_theme]` (default claro)."""
+    st.session_state.setdefault(KF_THEME_KEY, THEME_LIGHT)
+    if is_dark_theme():
+        bundle = f"{DARK_GLOBAL_CHROME_CSS}\n{DARK_COMPONENT_CSS}"
+    else:
+        bundle = f"{LUKANA_GLOBAL_CHROME_CSS}\n{LUKANA_COMPONENT_CSS}"
+    st.markdown(f"<style>{bundle}</style>", unsafe_allow_html=True)
