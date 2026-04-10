@@ -5,6 +5,7 @@ Supabase: schema.sql + patch_002 si la base ya existía sin usuarios.
 
 from __future__ import annotations
 
+import html
 import re
 import uuid
 import io
@@ -1335,6 +1336,60 @@ def import_excel_section(
             st.rerun()
 
 
+def _render_balances_native_lk_cards(rows: list[dict[str, Any]]) -> None:
+    """Saldos por cuenta como tarjetas claras (legibles; sin tabla oscura)."""
+    if not rows:
+        st.caption("Sin cuentas para mostrar.")
+        return
+    cells: list[str] = []
+    for r in rows:
+        lab = html.escape(str(r.get("Cuenta") or "—"))
+        cur = html.escape(str(r.get("Moneda") or ""))
+        try:
+            sal = float(r.get("Saldo", 0))
+        except (TypeError, ValueError):
+            sal = 0.0
+        cls = "lk-pos" if sal >= 0 else "lk-neg"
+        cells.append(
+            f'<div class="lk-stat"><h4>{lab}</h4>'
+            f'<p class="lk-val {cls}">{sal:,.2f} {cur}</p>'
+            f'<p class="lk-foot">Saldo calculado (inicial + movimientos)</p></div>'
+        )
+    st.markdown(
+        f'<div class="lk-grid lk-balance-cards-wrap">{"".join(cells)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_balances_ves_lk_cards(rows: list[dict[str, Any]]) -> None:
+    """Desglose con columna ≈ VES en tarjetas claras."""
+    if not rows:
+        st.caption("Sin filas.")
+        return
+    cells: list[str] = []
+    for r in rows:
+        lab = html.escape(str(r.get("Cuenta") or "—"))
+        cur = html.escape(str(r.get("Moneda") or ""))
+        try:
+            sal = float(r.get("Saldo", 0))
+        except (TypeError, ValueError):
+            sal = 0.0
+        try:
+            ves = float(r.get("≈ VES", 0))
+        except (TypeError, ValueError):
+            ves = 0.0
+        cls = "lk-pos" if sal >= 0 else "lk-neg"
+        cells.append(
+            f'<div class="lk-stat"><h4>{lab}</h4>'
+            f'<p class="lk-val {cls}">{sal:,.2f} {cur}</p>'
+            f'<p class="lk-foot">≈ {ves:,.2f} VES (referencia lateral)</p></div>'
+        )
+    st.markdown(
+        f'<div class="lk-grid lk-balance-cards-wrap">{"".join(cells)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def _pick_account_id_sidebar(opts: dict[str, str]) -> str:
     keys = list(opts.keys())
     if not keys:
@@ -1353,7 +1408,12 @@ def _pick_account_id_sidebar(opts: dict[str, str]) -> str:
             k = keys[row_start]
             lab = str(opts[k])
             short = (lab[:16] + "…") if len(lab) > 18 else lab
-            if st.button(short, key=f"kf_accsh_{k}", use_container_width=True):
+            if st.button(
+                short,
+                key=f"kf_accsh_{k}",
+                use_container_width=True,
+                type="secondary",
+            ):
                 st.session_state.kf_sidebar_account = k
                 st.rerun()
         with c_b:
@@ -1361,7 +1421,12 @@ def _pick_account_id_sidebar(opts: dict[str, str]) -> str:
                 k2 = keys[row_start + 1]
                 lab2 = str(opts[k2])
                 short2 = (lab2[:16] + "…") if len(lab2) > 18 else lab2
-                if st.button(short2, key=f"kf_accsh_{k2}", use_container_width=True):
+                if st.button(
+                    short2,
+                    key=f"kf_accsh_{k2}",
+                    use_container_width=True,
+                    type="secondary",
+                ):
                     st.session_state.kf_sidebar_account = k2
                     st.rerun()
     return str(
@@ -1454,7 +1519,7 @@ def main() -> None:
 
     with st.sidebar:
         st.markdown(f"**{user['display_name']}**  \n`{user['username']}`")
-        if st.button("Cerrar sesión", use_container_width=True):
+        if st.button("Cerrar sesión", type="primary", use_container_width=True):
             logout()
             st.rerun()
         st.divider()
@@ -1736,11 +1801,7 @@ def main() -> None:
         )
         try:
             _all_bal = all_balances_native(sb, accounts, load_transactions, compute_balance)
-            st.dataframe(
-                pd.DataFrame(_all_bal),
-                use_container_width=True,
-                hide_index=True,
-            )
+            _render_balances_native_lk_cards(_all_bal)
         except Exception as e:
             st.warning("No se pudieron cargar todos los saldos de una vez.")
             st.code(str(e))
@@ -1797,11 +1858,7 @@ def main() -> None:
                 sb, accounts, load_transactions, compute_balance, _ves_u, _ves_t
             )
             st.metric("Total patrimonio ≈ VES", f"{float(_tot):,.2f}")
-            st.dataframe(
-                pd.DataFrame(_rows),
-                use_container_width=True,
-                hide_index=True,
-            )
+            _render_balances_ves_lk_cards(_rows)
         elif _ves_u is not None and _ves_t is not None:
             st.info("Activá el desglose arriba para ver total y tabla por cuenta.")
 

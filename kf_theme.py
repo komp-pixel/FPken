@@ -75,6 +75,20 @@ LUKANA_COMPONENT_CSS = """
     margin: 0 0 0.25rem 0;
 }
 .lk-page-title em { font-style: normal; color: #2563eb; }
+/* Grilla de saldos en dashboard (cuentas × tarjetas) */
+.lk-balance-cards-wrap .lk-stat {
+    min-height: 0;
+    text-align: left;
+}
+.lk-balance-cards-wrap .lk-stat h4 {
+    font-size: 0.78rem;
+    line-height: 1.3;
+    word-break: break-word;
+    color: #334155 !important;
+}
+.lk-balance-cards-wrap .lk-stat .lk-val {
+    font-size: 1.2rem;
+}
 """
 
 LUKANA_GLOBAL_CHROME_CSS = """
@@ -85,6 +99,16 @@ LUKANA_GLOBAL_CHROME_CSS = """
 .main .block-container {
     padding-top: 1.25rem;
     padding-bottom: 2rem;
+    color-scheme: light;
+}
+/* Subtítulo bajo el título principal: bien oscuro */
+.main [data-testid="stCaption"],
+.main [data-testid="stCaption"] p,
+.main [data-testid="stCaption"] span,
+section[data-testid="stMain"] [data-testid="stCaption"] {
+    color: #0f172a !important;
+    opacity: 1 !important;
+    font-weight: 600 !important;
 }
 /* Sidebar: fondo claro + texto siempre legible (Streamlit suele poner gris muy claro) */
 [data-testid="stSidebar"] {
@@ -132,14 +156,38 @@ LUKANA_GLOBAL_CHROME_CSS = """
     color: #1d4ed8 !important;
     font-weight: 600;
 }
-/* Área principal: captions y ayudas */
-.main [data-testid="stCaption"],
-.main [data-testid="stCaption"] p,
-.main [data-testid="stCaption"] span,
-section[data-testid="stMain"] [data-testid="stCaption"] {
-    color: #334155 !important;
-    opacity: 1 !important;
-    font-weight: 500 !important;
+/* Botones lateral: secondary = tarjeta blanca + texto oscuro; primary = azul + blanco */
+[data-testid="stSidebar"] button[kind="secondary"],
+[data-testid="stSidebar"] [data-testid="baseButton-secondary"] {
+    background-color: #ffffff !important;
+    background-image: none !important;
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+    border: 1px solid #94a3b8 !important;
+    font-weight: 600 !important;
+}
+[data-testid="stSidebar"] button[kind="secondary"] p,
+[data-testid="stSidebar"] button[kind="secondary"] span,
+[data-testid="stSidebar"] [data-testid="baseButton-secondary"] p,
+[data-testid="stSidebar"] [data-testid="baseButton-secondary"] span {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+}
+[data-testid="stSidebar"] button[kind="primary"],
+[data-testid="stSidebar"] [data-testid="baseButton-primary"] {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+    background-image: none !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: none !important;
+    font-weight: 700 !important;
+}
+[data-testid="stSidebar"] button[kind="primary"] p,
+[data-testid="stSidebar"] button[kind="primary"] span,
+[data-testid="stSidebar"] [data-testid="baseButton-primary"] p,
+[data-testid="stSidebar"] [data-testid="baseButton-primary"] span {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
 }
 /* st.caption a veces sin testid según versión */
 .main div[data-testid="stVerticalBlock"] > div > [data-testid="stElementContainer"] small {
@@ -233,6 +281,15 @@ div[data-testid="stAlert"] {
     }
 }
 div[data-testid="stVerticalBlock"] button { min-height: 2.75rem; }
+/* Tablas interactivas: pedir tema claro al navegador y fondo blanco en el contenedor */
+[data-testid="stDataFrame"] {
+    background: #ffffff !important;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+}
+[data-testid="stDataFrame"] > div {
+    background-color: #ffffff !important;
+}
 """
 
 
