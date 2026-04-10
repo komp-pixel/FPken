@@ -32,7 +32,7 @@ from kf_constants import (
     WALLET_DEPOSIT_NETWORKS,
 )
 from kf_bcv import render_bcv_reference
-from kf_dashboard import render_finance_dashboard
+from kf_dashboard import render_finance_dashboard, render_global_accounts_panorama
 from kf_fx_convert import all_balances_native, all_balances_with_ves, resolve_ves_rates, to_ves
 from kf_p2p_binance import render_usdt_ves_p2p_reference
 from kf_reports import render_reports_page
@@ -1431,10 +1431,11 @@ def _pick_account_id_sidebar(opts: dict[str, str]) -> str:
                     st.rerun()
     return str(
         st.sidebar.selectbox(
-            "Cuenta activa",
+            "Cuenta para movimientos y registro",
             options=keys,
             format_func=lambda x: opts[x],
             key="kf_sidebar_account",
+            help="Listado y formularios de **Movimientos** usan esta cuenta por defecto; el panorama y saldos arriba son de **todas**.",
         )
     )
 
@@ -1787,19 +1788,45 @@ def main() -> None:
         '<p class="lk-page-title">Kenny <em>Finanzas</em></p>',
         unsafe_allow_html=True,
     )
-    st.caption("Espacio personal multiusuario · cada persona ve sus propias cuentas y movimientos")
+    st.caption(
+        "Vista centrada en **todas tus cuentas**: panorama, saldos y patrimonio. "
+        "En el lateral: **cuenta para movimientos** = donde registrás y ves el listado detallado."
+    )
 
     tab_dash, tab_mov, tab_acc, tab_rep, tab_usr = st.tabs(
         ["Dashboard", "Movimientos", "Cuentas", "Reportes", "Usuarios"]
     )
 
     with tab_dash:
+        with st.expander(
+            "Tu cadena Venezuela: Zelle (USD) → USDT → Bs y por qué importa el BCV",
+            expanded=False,
+        ):
+            st.markdown(
+                """
+Si cobrás en **dólares por Zelle** pero te conviene **pasar a USDT** y después a **bolívares** para pagar gastos,
+suele haber **gran diferencia** entre pagar todo en USD informal vs usar **Bs** (referencia **BCV** u otra tasa que manejes).
+
+**En esta app:**
+- **Ingreso**: te pagan el trabajo → registrá el dinero donde lo recibís (ej. cuenta Zelle en USD).
+- **Traspaso** (no es gasto): movés de **USD → USDT**, luego **USDT → cuenta en Bs**. Son cambios de “caja”, no consumo.
+- **Egreso con rubro**: cuando **gastás** de verdad (servicios, comida, etc.), sobre todo desde **Bs**.
+
+Así el **panorama** te muestra **de qué negocio entra** el dinero y **dónde lo gastás**, sin mezclar esos traspasos con el gasto real.
+                """
+            )
+        try:
+            render_global_accounts_panorama(sb, accounts, load_transactions_for_accounts)
+        except Exception as e:
+            st.warning("El panorama global no pudo cargarse.")
+            st.code(str(e))
+        st.divider()
         st.markdown(
-            '<p class="lk-section" style="margin-top:0;">Saldos por cuenta (todos tus bancos / cuentas)</p>',
+            '<p class="lk-section">Saldos por cuenta (todas a la vez)</p>',
             unsafe_allow_html=True,
         )
         st.caption(
-            "Acá ves el **saldo calculado** de **cada** cuenta a la vez. Más abajo, los gráficos usan solo la **cuenta activa** del lateral."
+            "Saldo calculado por cuenta (inicial + movimientos). Más abajo: gráficos y metas usan la **cuenta del lateral**."
         )
         try:
             _all_bal = all_balances_native(sb, accounts, load_transactions, compute_balance)
@@ -1809,7 +1836,7 @@ def main() -> None:
             st.code(str(e))
         st.divider()
         st.markdown(
-            '<p class="lk-section">Dashboard (cuenta del lateral)</p>',
+            '<p class="lk-section">Gráficos y metas (cuenta del lateral)</p>',
             unsafe_allow_html=True,
         )
         try:

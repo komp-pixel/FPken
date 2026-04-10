@@ -856,3 +856,200 @@ def render_finance_dashboard(
                 yaxis=dict(**_axis_style),
             )
             st.plotly_chart(fig_c, use_container_width=True)
+
+
+def txs_to_dataframe_with_accounts(
+    txs: list[dict[str, Any]], accounts: list[dict[str, Any]]
+) -> pd.DataFrame:
+    """Mismo esquema que txs_to_dataframe + cuenta y moneda de cada movimiento."""
+    amap = {str(a["id"]): a for a in accounts}
+    df = txs_to_dataframe(txs)
+    if df.empty or not txs:
+        return df
+    acc_ids: list[str] = []
+    labels: list[str] = []
+    curs: list[str] = []
+    for t in txs:
+        aid = str(t.get("account_id") or "")
+        acc_ids.append(aid)
+        a = amap.get(aid, {})
+        labels.append(str(a.get("label") or "—"))
+        curs.append(str(a.get("currency") or "?"))
+    out = df.copy()
+    out["account_id"] = acc_ids
+    out["account_label"] = labels
+    out["currency"] = curs
+    return out
+
+
+def render_global_accounts_panorama(
+    sb: Client,
+    accounts: list[dict[str, Any]],
+    load_transactions_for_accounts_fn: Any,
+) -> None:
+    """
+    Vista centrada en **todas** las cuentas: ingresos por negocio, egresos por rubro,
+    y totales por cuenta, **por moneda** (no mezcla USD con Bs).
+    """
+    st.markdown(
+        '<p class="lk-section" style="margin-top:0;">Panorama de todas las cuentas</p>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Unificá acá **de qué negocio entra** el dinero, **en qué rubro gastás** y **desde qué cuenta**, "
+        "sin mezclar monedas. Los traspasos (Zelle→USDT→Bs) podés ocultarlos para ver solo flujo real."
+    )
+    today = date.today()
+    exclude_transfers = st.checkbox(
+        "Excluir traspasos (solo ingresos/egresos reales, no movimientos entre tus cuentas)",
+        value=True,
+        key="gpan_ex_tr",
+        help="Recomendado para ver negocios y gastos; los traspasos igual figuran en saldos.",
+    )
+    range_key = st.selectbox(
+        "Período del panorama",
+        [
+            "Últimos 30 días",
+            "Este mes",
+            "Este año",
+            "Últimos 12 meses",
+            "Todo",
+            "Personalizado",
+        ],
+        index=0,
+        key="gpan_range",
+    )
+    if range_key == "Personalizado":
+        c0, c1 = st.columns(2)
+        with c0:
+            d0 = st.date_input("Desde", value=today - timedelta(days=29), key="gpan_d0")
+        with c1:
+            d1 = st.date_input("Hasta", value=today, key="gpan_d1")
+    elif range_key == "Últimos 30 días":
+        d0, d1 = today - timedelta(days=29), today
+    elif range_key == "Este mes":
+        d0, d1 = date(today.year, today.month, 1), today
+    elif range_key == "Este año":
+        d0, d1 = date(today.year, 1, 1), today
+    elif range_key == "Últimos 12 meses":
+        d0, d1 = today - timedelta(days=364), today
+    else:
+        d0, d1 = None, None
+
+    ids = [str(a["id"]) for a in accounts]
+    if not ids:
+        st.info("No hay cuentas cargadas.")
+        return
+    try:
+        all_txs = load_transactions_for_accounts_fn(sb, ids)
+    except Exception as e:
+        st.warning("No se pudieron cargar los movimientos de todas las cuentas.")
+        st.caption(str(e)[:200])
+        return
+
+    df = txs_to_dataframe_with_accounts(all_txs, accounts)
+    if len(df) and d0 is not None and d1 is not None:
+        dff = df.loc[(df["tx_date"] >= d0) & (df["tx_date"] <= d1)].copy()
+    else:
+        dff = df.copy()
+
+    if exclude_transfers and len(dff):
+        _tr = _is_transfer_like_df(dff)
+        dff_flow = dff.loc[~_tr].copy()
+    else:
+        dff_flow = dff.copy()
+
+    if dff_flow.empty:
+        st.info("No hay movimientos en el período (o solo traspasos si los excluiste).")
+        return
+
+    currencies = sorted(
+        {str(c) for c in dff_flow["currency"].dropna().unique() if str(c).strip()},
+        key=lambda x: (x != "USD", x != "USDT", x),
+    )
+    for cur in currencies:
+        sub = dff_flow[dff_flow["currency"] == cur]
+        if sub.empty:
+            continue
+        ing = sub[sub["tx_type"] == "ingreso"]["amount"].sum()
+        egr = sub[sub["tx_type"] == "egreso"]["amount"].sum()
+        net = float(ing) - float(egr)
+        st.markdown(
+            f'<p class="lk-panel-h">Moneda {html.escape(cur)}</p>',
+            unsafe_allow_html=True,
+        )
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Ingresos (flujo)", f"{float(ing):,.2f}")
+        m2.metric("Egresos (flujo)", f"{float(egr):,.2f}")
+        m3.metric("Neto", f"{net:,.2f}")
+        cleft, cright = st.columns(2)
+        with cleft:
+            st.markdown("**Ingresos por negocio / fuente**")
+            ing_df = sub[sub["tx_type"] == "ingreso"].copy()
+            ing_df["business"] = ing_df["business"].fillna("(sin negocio)")
+            if ing_df.empty:
+                st.caption("Sin ingresos en este período.")
+            else:
+                agn = (
+                    ing_df.groupby("business", as_index=False)["amount"]
+                    .sum()
+                    .sort_values("amount", ascending=False)
+                )
+                tot_i = float(agn["amount"].sum()) or 1.0
+                agn["pct"] = agn["amount"] / tot_i * 100.0
+                st.dataframe(
+                    agn.rename(
+                        columns={
+                            "business": "Negocio / fuente",
+                            "amount": "Total",
+                            "pct": "% del total",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        with cright:
+            st.markdown("**Egresos por rubro**")
+            eg_df = sub[sub["tx_type"] == "egreso"].copy()
+            eg_df["category"] = eg_df["category"].fillna("(sin categoría)")
+            if eg_df.empty:
+                st.caption("Sin egresos en este período.")
+            else:
+                agc = (
+                    eg_df.groupby("category", as_index=False)["amount"]
+                    .sum()
+                    .sort_values("amount", ascending=False)
+                )
+                tot_e = float(agc["amount"].sum()) or 1.0
+                agc["pct"] = agc["amount"] / tot_e * 100.0
+                st.dataframe(
+                    agc.rename(
+                        columns={
+                            "category": "Rubro",
+                            "amount": "Total",
+                            "pct": "% del total",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        st.markdown("**Por cuenta** (misma moneda)")
+        rows_pa: list[dict[str, Any]] = []
+        for lab in sorted(sub["account_label"].unique(), key=str):
+            s2 = sub[sub["account_label"] == lab]
+            i2 = float(s2[s2["tx_type"] == "ingreso"]["amount"].sum())
+            e2 = float(s2[s2["tx_type"] == "egreso"]["amount"].sum())
+            rows_pa.append(
+                {
+                    "Cuenta": lab,
+                    "Ingresos": i2,
+                    "Egresos": e2,
+                    "Neto": i2 - e2,
+                }
+            )
+        st.dataframe(
+            pd.DataFrame(rows_pa),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.divider()
