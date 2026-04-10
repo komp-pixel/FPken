@@ -69,6 +69,35 @@ def _by_cur_from_txs(
     return dict(by_cur)
 
 
+def _transfer_legs_list(
+    txs_tr: list[dict[str, Any]], amap: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Cada fila = un movimiento de traspaso (egreso o ingreso), ordenado por fecha."""
+    rows: list[dict[str, Any]] = []
+    for t in sorted(txs_tr, key=lambda x: str(x.get("tx_date") or ""), reverse=True):
+        aid = str(t.get("account_id", ""))
+        acc = amap.get(aid, {})
+        gid = str(t.get("transfer_group_id") or "").strip()
+        cid = str(t.get("counterpart_account_id") or "").strip()
+        contra = (
+            str(amap.get(cid, {}).get("label", "")) if cid else ""
+        )
+        rows.append(
+            {
+                "fecha": t.get("tx_date"),
+                "cuenta": acc.get("label", aid[:8]),
+                "tipo": t.get("tx_type"),
+                "monto": float(t.get("amount") or 0),
+                "moneda": acc.get("currency", "?"),
+                "descripcion": (t.get("description") or "")[:80],
+                "etiqueta": _disp_str(t.get("transfer_tag")),
+                "id_grupo": (gid[:10] + "…") if len(gid) > 10 else gid,
+                "cuenta_relacionada": contra,
+            }
+        )
+    return rows
+
+
 def _transfer_operation_rows(
     txs_tr: list[dict[str, Any]], amap: dict[str, dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -238,22 +267,28 @@ def _build_pdf_bytes(
     transfer_rows: list[list[str]] | None = None,
     brute_rows: list[list[str]] | None = None,
     analysis_by_currency: list[dict[str, Any]] | None = None,
+    transfer_legs_head: list[str] | None = None,
+    transfer_legs_rows: list[list[str]] | None = None,
 ) -> bytes:
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.pagesizes import landscape, letter
     from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib.units import cm
+    from reportlab.lib.units import inch
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+    # Carta US apaisada (~792×612 pt); márgenes 0,5" para que al imprimir en Letter no se corte el ancho útil.
+    _m = 0.5 * inch
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
-        pagesize=landscape(A4),
-        rightMargin=1.1 * cm,
-        leftMargin=1.1 * cm,
-        topMargin=1.1 * cm,
-        bottomMargin=1.1 * cm,
+        pagesize=landscape(letter),
+        rightMargin=_m,
+        leftMargin=_m,
+        topMargin=_m,
+        bottomMargin=_m,
     )
+    _page_w = landscape(letter)[0]
+    _usable_w = _page_w - 2 * _m
     styles = getSampleStyleSheet()
     story: list[Any] = []
     story.append(Paragraph(title.replace("&", "&amp;"), styles["Title"]))
@@ -332,7 +367,7 @@ def _build_pdf_bytes(
             if rubs:
                 story.append(Paragraph("<b>Egresos por rubro</b>", styles["Heading2"]))
                 rr = [["Rubro", "Total", "% del total egresos"]]
-                for r in rubs[:18]:
+                for r in rubs[:50]:
                     rr.append(
                         [
                             _pdf_safe_line(str(r.get("rubro", "")))[:32],
@@ -357,7 +392,7 @@ def _build_pdf_bytes(
             if negs:
                 story.append(Paragraph("<b>Ingresos por negocio / fuente</b>", styles["Heading2"]))
                 nr = [["Negocio / fuente", "Total", "% del total ingresos"]]
-                for r in negs[:18]:
+                for r in negs[:50]:
                     nr.append(
                         [
                             _pdf_safe_line(str(r.get("negocio", "")))[:32],
@@ -389,7 +424,7 @@ def _build_pdf_bytes(
         )
         story.append(Spacer(1, 6))
         tr_w = [52, 72, 58, 28, 72, 58, 28, 118]
-        t_tr = Table([transfer_head] + transfer_rows[:200], repeatRows=1, colWidths=tr_w)
+        t_tr = Table([transfer_head] + transfer_rows[:500], repeatRows=1, colWidths=tr_w)
         t_tr.setStyle(
             TableStyle(
                 [
@@ -402,6 +437,47 @@ def _build_pdf_bytes(
             )
         )
         story.append(t_tr)
+        story.append(Spacer(1, 12))
+    if transfer_legs_head and transfer_legs_rows:
+        story.append(Paragraph("<b>Todas las piernas de traspaso (cada movimiento)</b>", styles["Heading2"]))
+        story.append(
+            Paragraph(
+                "<i>Listado completo de egresos e ingresos que forman traspasos en el período.</i>",
+                styles["Normal"],
+            )
+        )
+        story.append(Spacer(1, 6))
+        _lw = int(_usable_w)
+        leg_w = [
+            int(_lw * 0.067),
+            int(_lw * 0.14),
+            int(_lw * 0.028),
+            int(_lw * 0.065),
+            int(_lw * 0.038),
+            int(_lw * 0.36),
+            int(_lw * 0.075),
+            _lw
+            - int(_lw * 0.067)
+            - int(_lw * 0.14)
+            - int(_lw * 0.028)
+            - int(_lw * 0.065)
+            - int(_lw * 0.038)
+            - int(_lw * 0.36)
+            - int(_lw * 0.075),
+        ]
+        t_legs = Table([transfer_legs_head] + transfer_legs_rows[:800], repeatRows=1, colWidths=leg_w)
+        t_legs.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#166534")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("FONTSIZE", (0, 0), (-1, -1), 5),
+                    ("GRID", (0, 0), (-1, -1), 0.1, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        story.append(t_legs)
         story.append(Spacer(1, 12))
     if brute_rows:
         story.append(Paragraph("<b>Todo registrado por moneda (incluye traspasos)</b>", styles["Heading2"]))
@@ -426,19 +502,45 @@ def _build_pdf_bytes(
         )
         story.append(t_b)
         story.append(Spacer(1, 12))
-    story.append(Paragraph("<b>Detalle de movimientos (horizontal, texto recortado para encajar)</b>", styles["Heading2"]))
-    detail_col_w = [48, 70, 26, 20, 54, 284, 72, 36, 44, 63]
+    story.append(
+        Paragraph(
+            "<b>Detalle de movimientos (flujo; carta apaisada, columnas ajustadas al ancho útil)</b>",
+            styles["Heading2"],
+        )
+    )
+    _uw = int(_usable_w)
+    detail_col_w = [
+        int(_uw * 0.061),
+        int(_uw * 0.1),
+        int(_uw * 0.034),
+        int(_uw * 0.028),
+        int(_uw * 0.07),
+        int(_uw * 0.33),
+        int(_uw * 0.08),
+        int(_uw * 0.042),
+        int(_uw * 0.05),
+        _uw
+        - int(_uw * 0.061)
+        - int(_uw * 0.1)
+        - int(_uw * 0.034)
+        - int(_uw * 0.028)
+        - int(_uw * 0.07)
+        - int(_uw * 0.33)
+        - int(_uw * 0.08)
+        - int(_uw * 0.042)
+        - int(_uw * 0.05),
+    ]
     t2 = Table([detail_head] + detail_rows, repeatRows=1, colWidths=detail_col_w)
     t2.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d2137")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                ("FONTSIZE", (0, 0), (-1, -1), 6),
-                ("GRID", (0, 0), (-1, -1), 0.12, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 5),
+                ("GRID", (0, 0), (-1, -1), 0.1, colors.grey),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 2),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("LEFTPADDING", (0, 0), (-1, -1), 1),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 1),
             ]
         )
     )
@@ -453,7 +555,10 @@ def render_reports_page(
     umap: dict[str, str],
 ) -> None:
     st.subheader("Reportes inteligentes")
-    st.caption("Resumen gerencial por rango de fechas y cuentas (USD, VES, USDT). Descargá PDF para imprimir.")
+    st.caption(
+        "Resumen por rango y cuentas. El PDF se genera en **carta US apaisada (Letter landscape)** con tablas "
+        "ajustadas al ancho útil para imprimir sin cortes."
+    )
 
     if not accounts:
         st.warning("No hay cuentas.")
@@ -488,16 +593,15 @@ def render_reports_page(
             **1 — Flujo real** es lo que la app considera *dinero que entra o sale de verdad* (ventas, gastos, fees).
             Los **traspasos** (de una cuenta tuya a otra) **no** son ganancia ni gasto: solo cambiás de “caja”.
 
-            **2 — Traspasos resumidos** agrupa cada operación como **Origen → Destino** para que veas el camino del dinero
-            sin buscar fila por fila.
+            **2 — Traspasos resumidos** (origen → destino) y **2b** el **listado de todas las piernas** (cada egreso/ingreso).
 
             **3 — Todo registrado por moneda** (solo si hay traspasos y tenés excluidos del flujo) suma **cada pierna**
             del movimiento: por eso ingresos y egresos se inflan respecto al flujo real; sirve para cruzar con extractos.
 
-            **1.5** resume por **moneda** el peso de cada rubro y de cada fuente de ingreso, y el **% gasto/ingreso**.
+            **1.5** solo **egresos por rubro**; **1.6** solo **ingresos por negocio** (más claros por separado).
 
-            El **detalle** al final va agrupado (ingresos, luego egresos por rubro); el **PDF** es horizontal e incluye
-            guía, análisis por moneda, traspasos y (cuando aplica) la tabla bruta.
+            El **detalle** al final va agrupado (ingresos, luego egresos por rubro). El **PDF** es **carta US apaisada**,
+            columnas calculadas al ancho útil para que no se corten al imprimir en Letter.
             """
         )
 
@@ -539,10 +643,10 @@ def render_reports_page(
     )
 
     guide_lines_pdf = [
-        "Este PDF está en formato horizontal (apaisado) para que el detalle de movimientos entre mejor en la hoja.",
+        "PDF en tamaño carta US (Letter) apaisado, márgenes 1/2 pulgada; tablas con anchos proporcionales al ancho útil para evitar cortes.",
         "Flujo real = ingresos y egresos sin contar traspasos entre cuentas propias (si la casilla está activa en la app).",
         "Traspaso = egreso en un origen e ingreso en un destino; el patrimonio total no cambia, solo la cuenta donde está el dinero.",
-        "La tabla 'Todo registrado por moneda' suma cada pierna: si hubo traspasos, ingresos y egresos brutos serán mayores que el flujo real.",
+        "Incluye resumen por rubro, por negocio, traspasos resumidos y listado completo de piernas de traspaso.",
     ]
 
     st.markdown("---")
@@ -573,47 +677,55 @@ def render_reports_page(
     )
 
     analysis = _analyze_flow_by_currency(txs_use, amap) if txs_use else []
-    st.markdown("### 1.5 Análisis inteligente (por moneda)")
+    st.markdown("### 1.5 Resumen de EGRESOS por rubro (por moneda)")
     st.caption(
-        "Cada moneda se analiza aparte (no se mezclan USD con VES). **% gasto/ingreso** = cuánto de lo que entró "
-        "se fue en egresos. Los **rubros** muestran el peso de cada gasto; los **negocios**, el de cada ingreso."
+        "Solo gastos clasificados por **rubro**. **% del total egresos** = peso de cada rubro dentro de todo lo gastado "
+        "en esa moneda en el período."
     )
     if not analysis:
         st.caption("Sin movimientos de flujo en el período para analizar.")
     else:
         for blk in analysis:
             cur = blk["currency"]
-            ing, egr, net = blk["ing"], blk["egr"], blk["net"]
-            pg = blk["pct_gasto_sobre_ingreso"]
-            pg_txt = f"{pg:.1f} %" if pg is not None else "n/d (no hubo ingresos)"
-            st.markdown(f"**{cur}** · Ingresos **{ing:,.2f}** · Egresos **{egr:,.2f}** · Neto **{net:,.2f}** · Gastos/ingresos **{pg_txt}**")
-            c_left, c_right = st.columns(2)
-            with c_left:
-                st.caption("Egresos por rubro (peso)")
-                dr = blk.get("rubros") or []
-                if dr:
-                    st.dataframe(
-                        pd.DataFrame(dr).rename(
-                            columns={"rubro": "Rubro", "total": "Total", "pct": "% del total egresos"}
-                        ),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                else:
-                    st.caption("—")
-            with c_right:
-                st.caption("Ingresos por negocio / fuente (peso)")
-                dn = blk.get("negocios") or []
-                if dn:
-                    st.dataframe(
-                        pd.DataFrame(dn).rename(
-                            columns={"negocio": "Negocio / fuente", "total": "Total", "pct": "% del total ingresos"}
-                        ),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                else:
-                    st.caption("—")
+            egr = blk["egr"]
+            dr = blk.get("rubros") or []
+            st.markdown(f"**Moneda {cur}** — total egresos en flujo **{egr:,.2f}**")
+            if dr:
+                st.dataframe(
+                    pd.DataFrame(dr).rename(
+                        columns={"rubro": "Rubro", "total": "Total", "pct": "% del total egresos"}
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.caption("Sin egresos con rubro en esta moneda.")
+
+    st.markdown("### 1.6 Resumen de INGRESOS por negocio / fuente (por moneda)")
+    st.caption(
+        "Solo entradas clasificadas por **negocio o fuente**. **% del total ingresos** = participación de cada una "
+        "dentro de todo lo ingresado en esa moneda."
+    )
+    if analysis:
+        for blk in analysis:
+            cur = blk["currency"]
+            ing = blk["ing"]
+            dn = blk.get("negocios") or []
+            st.markdown(f"**Moneda {cur}** — total ingresos en flujo **{ing:,.2f}**")
+            if dn:
+                st.dataframe(
+                    pd.DataFrame(dn).rename(
+                        columns={
+                            "negocio": "Negocio / fuente",
+                            "total": "Total",
+                            "pct": "% del total ingresos",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.caption("Sin ingresos con negocio en esta moneda.")
 
     st.markdown("### 2. Traspasos entre cuentas (origen → destino)")
     if not txs_transfer_like:
@@ -660,6 +772,20 @@ def render_reports_page(
                     }
                 )
             st.dataframe(pd.DataFrame(loose_rows), use_container_width=True, hide_index=True)
+
+    st.markdown("### 2b. Todas las piernas de traspaso (listado completo)")
+    if not txs_transfer_like:
+        st.caption("No hay traspasos en el período.")
+    else:
+        st.caption(
+            f"**{len(txs_transfer_like)}** movimiento(s): cada fila es un egreso o ingreso que forma parte de un traspaso. "
+            "Así ves todo lo que entró y salió entre cuentas, además del resumen 2."
+        )
+        st.dataframe(
+            pd.DataFrame(_transfer_legs_list(txs_transfer_like, amap)),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     st.markdown("### 3. Todo registrado por moneda (incluye traspasos)")
     if exclude_transfers and txs_transfer_like:
@@ -726,13 +852,13 @@ def render_reports_page(
     st.markdown("### 4. Detalle agrupado (ingresos arriba, egresos abajo; orden por rubro/negocio y fecha)")
     st.caption(
         "Tip: al **imprimir** esta pantalla con el navegador (Ctrl+P), elegí **horizontal** y márgenes normales. "
-        "El **PDF** de abajo ya va en horizontal y con columnas ajustadas."
+        "El **PDF** de abajo es **carta US apaisada** (Letter landscape), columnas proporcionales al ancho útil."
     )
     st.markdown(
         """
         <style>
         @media print {
-          @page { size: A4 landscape; margin: 10mm; }
+          @page { size: letter landscape; margin: 10mm; }
         }
         </style>
         """,
@@ -784,12 +910,12 @@ def render_reports_page(
         detail_rows_pdf.append(
             [
                 str(t.get("tx_date", ""))[:10],
-                str(acc.get("label", ""))[:18],
+                str(acc.get("label", ""))[:16],
                 cur,
                 (t.get("tx_type") or "")[:1].upper(),
                 f'{float(t.get("amount") or 0):,.2f}',
-                str(t.get("description", ""))[:44],
-                rub_neg[:22],
+                str(t.get("description", ""))[:36],
+                rub_neg[:18],
                 fee_s,
                 _disp_str(t.get("transfer_tag"))[:12],
                 _rel,
@@ -849,6 +975,34 @@ def render_reports_page(
                 [cur, f'{s["ing"]:,.2f}', f'{s["egr"]:,.2f}', f"{net:,.2f}"]
             )
 
+    transfer_legs_head_pdf: list[str] | None = None
+    transfer_legs_rows_pdf: list[list[str]] | None = None
+    if txs_transfer_like:
+        transfer_legs_head_pdf = [
+            "Fecha",
+            "Cuenta",
+            "T",
+            "Monto",
+            "M",
+            "Descripción",
+            "Grupo",
+            "Contra",
+        ]
+        transfer_legs_rows_pdf = []
+        for row in _transfer_legs_list(txs_transfer_like, amap):
+            transfer_legs_rows_pdf.append(
+                [
+                    str(row.get("fecha", ""))[:10],
+                    str(row.get("cuenta", ""))[:18],
+                    (str(row.get("tipo", ""))[:1] or "?").upper(),
+                    f'{float(row.get("monto") or 0):,.2f}',
+                    str(row.get("moneda", ""))[:4],
+                    str(row.get("descripcion", ""))[:40],
+                    str(row.get("id_grupo", ""))[:12],
+                    str(row.get("cuenta_relacionada", ""))[:18],
+                ]
+            )
+
     try:
         pdf = _build_pdf_bytes(
             "Kenny Finanzas — Resumen gerencial",
@@ -858,18 +1012,21 @@ def render_reports_page(
             insight_lines,
             sum_rows,
             detail_head,
-            detail_rows_pdf[:400],
+            detail_rows_pdf[:500],
             transfer_head_pdf,
             transfer_rows_pdf,
             brute_rows_pdf,
             analysis_by_currency=analysis if analysis else None,
+            transfer_legs_head=transfer_legs_head_pdf,
+            transfer_legs_rows=transfer_legs_rows_pdf,
         )
         st.download_button(
-            "Descargar PDF (imprimir)",
+            "Descargar PDF (carta apaisada)",
             data=pdf,
             file_name=f"kenny_finanzas_{d0}_{d1}.pdf",
             mime="application/pdf",
             type="primary",
         )
+        st.caption("En el visor de PDF / impresora, elegí **Letter** u **carta** y **horizontal** si hace falta.")
     except Exception as e:
         st.warning(f"No se pudo generar el PDF (¿instalaste reportlab?): {e}")
