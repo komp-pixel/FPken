@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import html
+from datetime import date
+from decimal import Decimal
 
 import streamlit as st
 
@@ -123,11 +125,12 @@ def _label_sort_key(acc: dict) -> tuple[str, str]:
 _CARD_STYLE = """
 <style>
 .kf-pay-card-wrap .kf-pay-card {
-    border: 1px solid rgba(49, 51, 63, 0.12);
-    border-radius: 10px;
-    padding: 1rem 1.1rem 1.1rem;
-    margin-bottom: 0.85rem;
-    background: linear-gradient(180deg, #fafbfc 0%, #f4f5f7 100%);
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 1.05rem 1.15rem 1.15rem;
+    margin-bottom: 0.9rem;
+    background: #fff;
+    box-shadow: 0 2px 14px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 .kf-pay-card-wrap .kf-head {
     display: flex;
@@ -136,8 +139,8 @@ _CARD_STYLE = """
     flex-wrap: wrap;
     gap: 0.35rem 1rem;
     margin-bottom: 0.75rem;
-    border-bottom: 1px solid rgba(49, 51, 63, 0.08);
-    padding-bottom: 0.55rem;
+    border-bottom: 1px solid #f1f5f9;
+    padding-bottom: 0.6rem;
 }
 .kf-pay-card-wrap .kf-title-row {
     display: flex;
@@ -145,15 +148,64 @@ _CARD_STYLE = """
     gap: 0.5rem;
 }
 .kf-pay-card-wrap .kf-dot {
-    width: 9px;
-    height: 9px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
 }
 .kf-pay-card-wrap .kf-meta {
     font-size: 0.8rem;
-    color: rgba(49, 51, 63, 0.65);
+    color: #64748b;
     text-align: right;
+    font-weight: 500;
+}
+.kf-pay-card-wrap .kf-balance-strip {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    margin: 0 0 0.85rem 0;
+    padding: 0.75rem 0.95rem;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+    border: 1px solid #bfdbfe;
+}
+.kf-pay-card-wrap .kf-balance-strip.kf-banco {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    border: none;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
+}
+.kf-pay-card-wrap .kf-balance-strip label {
+    display: block;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    margin-bottom: 0.2rem;
+    color: #64748b;
+}
+.kf-pay-card-wrap .kf-balance-strip.kf-banco label {
+    color: rgba(255,255,255,0.85);
+}
+.kf-pay-card-wrap .kf-balance-amt {
+    font-size: 1.2rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #0f172a;
+}
+.kf-pay-card-wrap .kf-balance-strip.kf-banco .kf-balance-amt {
+    color: #fff !important;
+}
+.kf-pay-card-wrap .kf-bal-pos { color: #15803d !important; }
+.kf-pay-card-wrap .kf-bal-neg { color: #b91c1c !important; }
+.kf-pay-card-wrap .kf-balance-date {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    font-weight: 600;
+}
+.kf-pay-card-wrap .kf-balance-strip.kf-banco .kf-balance-date {
+    color: rgba(255,255,255,0.9);
 }
 .kf-pay-card-wrap .kf-grid {
     display: grid;
@@ -165,26 +217,33 @@ _CARD_STYLE = """
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    color: rgba(49, 51, 63, 0.55);
+    color: #94a3b8;
     margin-bottom: 0.2rem;
+    font-weight: 600;
 }
 .kf-pay-card-wrap .kf-fld span {
     font-size: 0.95rem;
-    color: #1a1c24;
+    color: #0f172a;
     word-break: break-word;
 }
 .kf-pay-card-wrap.kf-interactive .kf-pay-card {
-    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
 }
 .kf-pay-card-wrap.kf-interactive .kf-pay-card:hover {
-    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.14);
-    border-color: rgba(59, 130, 246, 0.35);
+    box-shadow: 0 8px 28px rgba(37, 99, 235, 0.12);
+    border-color: #93c5fd;
 }
 </style>
 """
 
 
-def _card_html(acc: dict, kind: str) -> str:
+def _card_html(
+    acc: dict,
+    kind: str,
+    *,
+    balance: Decimal | None = None,
+    balance_as_of: date | None = None,
+) -> str:
     title = _card_title(acc, kind)
     dot = _dot_color(acc, kind)
     subtitle = acc.get("label") or "—"
@@ -196,24 +255,52 @@ def _card_html(acc: dict, kind: str) -> str:
         f"<span>{html.escape(str(val))}</span></div>"
         for lab, val in fields
     )
+
+    balance_html = ""
+    if balance is not None:
+        cur_s = str(cur) if cur != "—" else ""
+        amt = f"{float(balance):,.2f}"
+        if cur_s:
+            amt = f"{amt} {html.escape(cur_s)}"
+        bal_cls = "kf-bal-pos" if balance >= 0 else "kf-bal-neg"
+        strip_cls = "kf-balance-strip kf-banco" if kind == "banco" else "kf-balance-strip"
+        amt_cls = "" if kind == "banco" else f" {bal_cls}"
+        d_s = balance_as_of.isoformat() if balance_as_of else ""
+        balance_html = f"""
+  <div class="{strip_cls}">
+    <div>
+      <label>Saldo al día</label>
+      <span class="kf-balance-amt{amt_cls}">{amt}</span>
+    </div>
+    <div class="kf-balance-date">{html.escape(d_s)}</div>
+  </div>"""
+
     return f"""
 <div class="kf-pay-card">
   <div class="kf-head">
     <div class="kf-title-row">
       <span class="kf-dot" style="background:{dot};"></span>
-      <strong style="font-size:1.05rem;">{html.escape(title)}</strong>
+      <strong style="font-size:1.05rem;color:#0f172a;">{html.escape(title)}</strong>
     </div>
     <div class="kf-meta">{html.escape(str(subtitle))} · {html.escape(str(cur))} · {html.escape(kind_es)}</div>
   </div>
+  {balance_html}
   <div class="kf-grid">{fields_html}</div>
 </div>
 """
 
 
-def _render_card(acc: dict, kind: str, *, interactive: bool = False) -> None:
+def _render_card(
+    acc: dict,
+    kind: str,
+    *,
+    interactive: bool = False,
+    balance: Decimal | None = None,
+    balance_as_of: date | None = None,
+) -> None:
     cls = "kf-pay-card-wrap kf-interactive" if interactive else "kf-pay-card-wrap"
     st.markdown(
-        f'<div class="{cls}">{_card_html(acc, kind)}</div>',
+        f'<div class="{cls}">{_card_html(acc, kind, balance=balance, balance_as_of=balance_as_of)}</div>',
         unsafe_allow_html=True,
     )
     n = str(acc.get("notes") or "").strip()
@@ -227,13 +314,18 @@ def render_payment_method_cards(
     heading: str = "Mis cuentas y métodos de pago",
     caption: str | None = None,
     edit_select_state_key: str = "kf_accounts_edit_select",
+    balances_by_account_id: dict[str, Decimal] | None = None,
+    balance_as_of: date | None = None,
 ) -> None:
     """Lista de cuentas como tarjetas; orden alfabético por nombre (label)."""
     if not accounts:
         st.info("Todavía no hay cuentas registradas.")
         return
 
-    st.markdown(f"### {heading}")
+    st.markdown(
+        f'<p class="lk-section" style="margin-top:0;">{html.escape(heading)}</p>',
+        unsafe_allow_html=True,
+    )
     if caption:
         st.caption(caption)
     st.caption(
@@ -250,7 +342,17 @@ def render_payment_method_cards(
     ordered = sorted(accounts, key=_label_sort_key)
     for acc in ordered:
         k = infer_account_kind(acc)
-        _render_card(acc, k, interactive=True)
+        aid = str(acc.get("id") or "").strip()
+        bal: Decimal | None = None
+        if balances_by_account_id is not None and aid:
+            bal = balances_by_account_id.get(aid)
+        _render_card(
+            acc,
+            k,
+            interactive=True,
+            balance=bal,
+            balance_as_of=balance_as_of,
+        )
         aid = str(acc.get("id") or "").strip()
         if not aid:
             continue

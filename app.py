@@ -35,6 +35,7 @@ from kf_dashboard import render_finance_dashboard
 from kf_fx_convert import all_balances_native, all_balances_with_ves, resolve_ves_rates, to_ves
 from kf_p2p_binance import render_usdt_ves_p2p_reference
 from kf_reports import render_reports_page
+from kf_theme import inject_lukana_theme
 
 
 def _pick_list_value(selected: str, other_text: str) -> str | None:
@@ -494,7 +495,7 @@ def _wallet_row_dict(
 
 
 def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, Any], *, account_owner_id: str) -> None:
-    st.subheader("Cuentas y métodos de pago")
+    st.markdown('<p class="lk-section" style="margin-top:0;">Cuentas y métodos de pago</p>', unsafe_allow_html=True)
     st.caption(
         "**Banco** = Banesco, BofA, Banca Amiga, Pago Móvil… "
         "**Wallet** = Binance / USDT / on-chain. "
@@ -505,13 +506,30 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
         "**`patch_006_wallet_deposit.sql`** y **`patch_008_owner_user_scope.sql`**."
     )
 
+    acc_ids = [str(a["id"]) for a in accounts]
+    txs_by_acc: dict[str, list[dict[str, Any]]] = {aid: [] for aid in acc_ids}
+    if acc_ids:
+        try:
+            _tx_all = load_transactions_for_accounts(sb, acc_ids)
+            for t in _tx_all:
+                aid = str(t.get("account_id") or "")
+                if aid in txs_by_acc:
+                    txs_by_acc[aid].append(t)
+        except Exception:
+            pass
+    balances_by_id = {
+        str(a["id"]): compute_balance(a, txs_by_acc.get(str(a["id"]), [])) for a in accounts
+    }
+
     render_payment_method_cards(
         accounts,
-        heading="Vista tarjeta (como métodos P2P)",
+        heading="Tus cuentas (saldo al día)",
+        balances_by_account_id=balances_by_id,
+        balance_as_of=date.today(),
     )
     st.divider()
 
-    st.subheader("Editar registro")
+    st.markdown('<p class="lk-section">Editar registro</p>', unsafe_allow_html=True)
     opts = {
         str(a["id"]): f'[{ACCOUNT_KIND_LABELS.get(_infer_account_kind(a), "?")}] {a.get("label")} ({a.get("currency")})'
         for a in accounts
@@ -669,7 +687,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
                 st.error("No se pudo guardar.")
                 st.code(wmsg or "")
 
-    st.markdown("### Eliminar registro")
+    st.markdown('<p class="lk-section">Eliminar registro</p>', unsafe_allow_html=True)
     st.caption(
         "Si esta cuenta se creó duplicada o por error, podés borrarla aquí. "
         "Se eliminan también todos los movimientos de esa cuenta."
@@ -698,7 +716,7 @@ def page_accounts(sb: Client, accounts: list[dict[str, Any]], user: dict[str, An
     for a in accounts:
         by_k[_infer_account_kind(a)].append(a)
 
-    st.markdown("### Dar de alta por tipo")
+    st.markdown('<p class="lk-section">Dar de alta por tipo</p>', unsafe_allow_html=True)
     for kind, title in (
         ("banco", "Cuentas bancarias"),
         ("wallet", "Wallets y crypto"),
@@ -1052,7 +1070,7 @@ def _should_skip_row(desc: str, *, filter_noise: bool) -> bool:
 
 
 def page_users_admin(sb: Client) -> None:
-    st.subheader("Usuarios")
+    st.markdown('<p class="lk-section" style="margin-top:0;">Usuarios</p>', unsafe_allow_html=True)
     st.caption("Solo administradores. Orlando y Kenny pueden tener cada uno su usuario.")
     with st.form("nu"):
         dn = st.text_input("Nombre para mostrar")
@@ -1089,7 +1107,7 @@ def page_users_admin(sb: Client) -> None:
 def import_excel_section(
     sb: Client, account_id: str, user_id: str, display_name: str
 ) -> None:
-    st.subheader("Importar desde Excel")
+    st.markdown('<p class="lk-section" style="margin-top:0;">Importar desde Excel</p>', unsafe_allow_html=True)
     st.write(
         "Formato tipo **FECHA / DESCRIPCION / INGRESO / EGRESO** (BofA Kenny) o una sola columna de monto."
     )
@@ -1317,23 +1335,6 @@ def import_excel_section(
             st.rerun()
 
 
-def _inject_responsive_styles() -> None:
-    st.markdown(
-        """
-        <style>
-        @media (max-width: 768px) {
-            .block-container {
-                padding-left: 0.85rem !important;
-                padding-right: 0.85rem !important;
-            }
-        }
-        div[data-testid="stVerticalBlock"] button { min-height: 2.75rem; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def _pick_account_id_sidebar(opts: dict[str, str]) -> str:
     keys = list(opts.keys())
     if not keys:
@@ -1443,11 +1444,11 @@ def main() -> None:
         )
         st.stop()
 
+    inject_lukana_theme()
+
     user = gate_auth(sb)
     if not user:
         return
-
-    _inject_responsive_styles()
 
     account_owner_id = str(user["id"])
 
@@ -1526,7 +1527,10 @@ def main() -> None:
         )
 
     if not accounts:
-        st.title("Kenny Finanzas")
+        st.markdown(
+            '<p class="lk-page-title">Kenny <em>Finanzas</em></p>',
+            unsafe_allow_html=True,
+        )
         st.warning(
             "No hay cuentas visibles para el usuario elegido. Si creaste cuentas antes y no aparecen, "
             "pueden estar **sin propietario** en la base. Como administrador, revisá también "
@@ -1547,7 +1551,10 @@ def main() -> None:
             "Usuario listo. **Ahora creá la cuenta del banco** (BofA) con el formulario de abajo; "
             "sin eso no hay Dashboard ni movimientos."
         )
-        st.subheader("Primer registro (elegí una pestaña)")
+        st.markdown(
+            '<p class="lk-section" style="margin-top:0;">Primer registro (elegí una pestaña)</p>',
+            unsafe_allow_html=True,
+        )
         st.caption("Banco, wallet y app son formularios distintos — no mezcles datos.")
         tb, tw, ta = st.tabs(["Cuenta bancaria", "Wallet crypto", "App Zinly / Zelle"])
         with tb:
@@ -1709,7 +1716,10 @@ def main() -> None:
     umap = load_user_map(sb)
     balance = compute_balance(acc, txs)
 
-    st.title("Kenny Finanzas")
+    st.markdown(
+        '<p class="lk-page-title">Kenny <em>Finanzas</em></p>',
+        unsafe_allow_html=True,
+    )
     st.caption("Espacio personal multiusuario · cada persona ve sus propias cuentas y movimientos")
 
     tab_dash, tab_mov, tab_acc, tab_rep, tab_usr = st.tabs(
@@ -1717,7 +1727,10 @@ def main() -> None:
     )
 
     with tab_dash:
-        st.markdown("### Saldos por cuenta (todos tus bancos / cuentas)")
+        st.markdown(
+            '<p class="lk-section" style="margin-top:0;">Saldos por cuenta (todos tus bancos / cuentas)</p>',
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Acá ves el **saldo calculado** de **cada** cuenta a la vez. Más abajo, los gráficos usan solo la **cuenta activa** del lateral."
         )
@@ -1732,7 +1745,10 @@ def main() -> None:
             st.warning("No se pudieron cargar todos los saldos de una vez.")
             st.code(str(e))
         st.divider()
-        st.markdown("### Dashboard (cuenta del lateral)")
+        st.markdown(
+            '<p class="lk-section">Dashboard (cuenta del lateral)</p>',
+            unsafe_allow_html=True,
+        )
         try:
             render_finance_dashboard(
                 txs,
@@ -1748,7 +1764,10 @@ def main() -> None:
             st.error("El tablero falló al cargar. Probá recargar la página o revisá los datos.")
             st.code(str(e))
         st.divider()
-        st.markdown("### Cotizaciones (referencia)")
+        st.markdown(
+            '<p class="lk-section">Cotizaciones (referencia)</p>',
+            unsafe_allow_html=True,
+        )
         _bcv_col, _p2p_intro = st.columns([1, 2])
         with _bcv_col:
             render_bcv_reference()
@@ -1759,7 +1778,10 @@ def main() -> None:
             )
         render_usdt_ves_p2p_reference()
         st.divider()
-        st.markdown("### Patrimonio en bolívares (todas las cuentas)")
+        st.markdown(
+            '<p class="lk-section">Patrimonio en bolívares (todas las cuentas)</p>',
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Usa la tasa de la barra lateral. Activá el desglose solo si querés total y tabla "
             "(consulta movimientos de cada cuenta)."
@@ -2232,7 +2254,10 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
                 )
 
         st.divider()
-        st.subheader("Traspasos registrados")
+        st.markdown(
+            '<p class="lk-section" style="margin-top:0;">Traspasos registrados</p>',
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Esta tabla muestra **solo traspasos** (grupo origen + destino), en **todas** tus cuentas. "
             "Usala para detectar duplicados o errores y luego borrarlos por grupo."
@@ -2310,7 +2335,10 @@ Abajo, **Vista en cadena** resume cada traspaso con monedas en una línea.
                 "Esos no aparecen en la tabla de arriba; podés borrarlos por UUID."
             )
 
-        st.subheader("Últimos movimientos (cuenta activa)")
+        st.markdown(
+            '<p class="lk-section" style="margin-top:0;">Últimos movimientos (cuenta activa)</p>',
+            unsafe_allow_html=True,
+        )
         st.caption(
             f"Solo la cuenta del lateral: **{acc.get('label', '—')}**. Columna **Naturaleza**: "
             f"↔ traspaso entre cuentas, ↓ gasto con rubro, ↑ ingreso."

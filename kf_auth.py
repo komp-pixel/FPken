@@ -241,7 +241,10 @@ def gate_auth(sb: Client) -> dict[str, Any] | None:
     if u:
         return u
 
-    st.title("Finanzas Personales")
+    st.markdown(
+        '<p class="lk-page-title">Kenny <em>Finanzas</em></p>',
+        unsafe_allow_html=True,
+    )
     st.caption("Iniciá sesión para ver movimientos y el tablero.")
 
     try:
@@ -255,7 +258,10 @@ def gate_auth(sb: Client) -> dict[str, Any] | None:
         return None
 
     if n == 0:
-        st.subheader("Primer acceso: crear administrador")
+        st.markdown(
+            '<p class="lk-section" style="margin-top:0;">Primer acceso: crear administrador</p>',
+            unsafe_allow_html=True,
+        )
         st.write("Orlando o Kenny puede ser el primer usuario; después podrá crear al otro.")
         with st.form("bootstrap"):
             display_name = st.text_input("Nombre para mostrar", placeholder="Kenny")

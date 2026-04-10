@@ -554,7 +554,10 @@ def render_reports_page(
     accounts: list[dict[str, Any]],
     umap: dict[str, str],
 ) -> None:
-    st.subheader("Reportes inteligentes")
+    st.markdown(
+        '<p class="lk-section" style="margin-top:0;">Reportes inteligentes</p>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         "Resumen por rango y cuentas. El PDF se genera en **carta US apaisada (Letter landscape)** con tablas "
         "ajustadas al ancho útil para imprimir sin cortes."
@@ -650,7 +653,10 @@ def render_reports_page(
     ]
 
     st.markdown("---")
-    st.markdown("### 1. Flujo del período (para entender negocio)")
+    st.markdown(
+        '<p class="lk-section" style="margin-top:0;">1. Flujo del período (para entender negocio)</p>',
+        unsafe_allow_html=True,
+    )
     st.caption(flow_caption)
     if exclude_transfers and txs_transfer_like:
         st.caption(
@@ -677,7 +683,10 @@ def render_reports_page(
     )
 
     analysis = _analyze_flow_by_currency(txs_use, amap) if txs_use else []
-    st.markdown("### 1.5 Resumen de EGRESOS por rubro (por moneda)")
+    st.markdown(
+        '<p class="lk-section">1.5 Resumen de EGRESOS por rubro (por moneda)</p>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         "Solo gastos clasificados por **rubro**. **% del total egresos** = peso de cada rubro dentro de todo lo gastado "
         "en esa moneda en el período."
@@ -701,7 +710,10 @@ def render_reports_page(
             else:
                 st.caption("Sin egresos con rubro en esta moneda.")
 
-    st.markdown("### 1.6 Resumen de INGRESOS por negocio / fuente (por moneda)")
+    st.markdown(
+        '<p class="lk-section">1.6 Resumen de INGRESOS por negocio / fuente (por moneda)</p>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         "Solo entradas clasificadas por **negocio o fuente**. **% del total ingresos** = participación de cada una "
         "dentro de todo lo ingresado en esa moneda."
@@ -727,7 +739,10 @@ def render_reports_page(
             else:
                 st.caption("Sin ingresos con negocio en esta moneda.")
 
-    st.markdown("### 2. Traspasos entre cuentas (origen → destino)")
+    st.markdown(
+        '<p class="lk-section">2. Traspasos entre cuentas (origen → destino)</p>',
+        unsafe_allow_html=True,
+    )
     if not txs_transfer_like:
         st.caption("En este período no hay movimientos marcados como traspaso en las cuentas seleccionadas.")
     else:
@@ -773,7 +788,10 @@ def render_reports_page(
                 )
             st.dataframe(pd.DataFrame(loose_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("### 2b. Todas las piernas de traspaso (listado completo)")
+    st.markdown(
+        '<p class="lk-section">2b. Todas las piernas de traspaso (listado completo)</p>',
+        unsafe_allow_html=True,
+    )
     if not txs_transfer_like:
         st.caption("No hay traspasos en el período.")
     else:
@@ -787,7 +805,10 @@ def render_reports_page(
             hide_index=True,
         )
 
-    st.markdown("### 3. Todo registrado por moneda (incluye traspasos)")
+    st.markdown(
+        '<p class="lk-section">3. Todo registrado por moneda (incluye traspasos)</p>',
+        unsafe_allow_html=True,
+    )
     if exclude_transfers and txs_transfer_like:
         st.caption(
             "Aquí se cuentan **todas** las piernas de cada movimiento. Un traspaso suma a la vez un ingreso y un egreso; "
@@ -849,7 +870,10 @@ def render_reports_page(
         df = pd.concat([df_ing, df_eg], ignore_index=True)
         df["fecha"] = df["fecha"].dt.date
 
-    st.markdown("### 4. Detalle agrupado (ingresos arriba, egresos abajo; orden por rubro/negocio y fecha)")
+    st.markdown(
+        '<p class="lk-section">4. Detalle agrupado (ingresos arriba, egresos abajo; orden por rubro/negocio y fecha)</p>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         "Tip: al **imprimir** esta pantalla con el navegador (Ctrl+P), elegí **horizontal** y márgenes normales. "
         "El **PDF** de abajo es **carta US apaisada** (Letter landscape), columnas proporcionales al ancho útil."
